@@ -8,6 +8,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Dict, Iterable, List, Optional, Sequence
 
+from .atomic import atomic_write
 from .models import ALLOWED_METHODS, ALLOWED_STATUS, PaymentOption, Request
 from .money import fmt_plan, fmt_short, parse_money, q2
 
@@ -157,8 +158,13 @@ def write_csv(path: str, rows: Iterable[OutputRow]) -> None:
     # `lineterminator="\n"`: csv.writer's dialect default is CRLF, but every organizer-supplied
     # CSV (dataset/output.csv, sample_requests.csv, ...) uses LF, and the validator reports CRLF
     # as a serialization defect because a grader splitting on "\n" would break on it.
-    with open(path, "w", newline="", encoding="utf-8") as fh:
+    # Written atomically: the previous output.csv survives any failure before the final rename.
+    rows = list(rows)
+
+    def _write(fh) -> None:
         w = csv.writer(fh, lineterminator="\n")
         w.writerow(COLUMNS)
         for r in rows:
             w.writerow(r.as_list())
+
+    atomic_write(path, _write, mode="w", encoding="utf-8", newline="")

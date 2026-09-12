@@ -1,6 +1,6 @@
 # Token usage and cost report
 
-Generated: 2026-09-12 20:13:37Z
+Generated: 2026-09-12 20:38:25Z
 
 This file summarises **the final full-dataset run that produced `output.csv`**.
 
@@ -60,16 +60,17 @@ conservatively prices them as regular input tokens.
 
 ## Reproducibility fingerprint
 
-Combined sha256 over the engine files: `df6aa6eec08c731b867dd3d353306e1e6853ff68afd25b8bd69c2d6d98b3ac4e`
+Combined sha256 over the engine files: `615fc97de598b8f1ef0b996d7bd4e84201ef7bbea4d20cec3168c13cabf59402`
 
 | File | SHA-256 |
 |---|---|
 | `buyorwait/__init__.py` | `fb36a78987f9db7b801178a93247e37cec8944259368b749542eccd1086623ce` |
+| `buyorwait/atomic.py` | `d7bef925e5eb555dc0a9d7c671e169756fd0c4f443cb43ffe85fe49d452c77f5` |
 | `buyorwait/classify.py` | `6f2f509c1b051d4925eec93abc97e32e27539ac66cebe4c76357cd17e719fc25` |
 | `buyorwait/evidence.py` | `780d04d10be8e3c8c7ef2998deb6170eb890f1f07a63619d55015e63c16674bd` |
 | `buyorwait/explain.py` | `81b5a88d7199470ffdf354336367f2bdb385cf6eea4c3fc00f9f9f652d5ced6e` |
 | `buyorwait/extraction/__init__.py` | `469f5e2d894b2458312a16699e07b2a7e901fb1f9d7cb9b1907088efdf4fba15` |
-| `buyorwait/extraction/gather.py` | `486213e86074a3fe78d05857d99af704eeb1224dd16d129e1cf14d36cd540edf` |
+| `buyorwait/extraction/gather.py` | `992149da2de076a4203bee6821ea945876f457e35c03d7d5ea484b5bb5a8bcdf` |
 | `buyorwait/extraction/llm.py` | `972edd397c91c398d336929418dbebad3b5cbeaeac9f59c8c5f54ff87edab949` |
 | `buyorwait/extraction/rules.py` | `924c5d48bde5d186ba35e1850ae1d7ab085cc56ec56338017f9ceb9c11746677` |
 | `buyorwait/fingerprint.py` | `c7e07deca4f454c8eb445379923556f3c55a1012839ea7f14ee3e1e0b926571a` |
@@ -79,7 +80,7 @@ Combined sha256 over the engine files: `df6aa6eec08c731b867dd3d353306e1e6853ff68
 | `buyorwait/loaders.py` | `d39f947cdbf61e5e862e04ba446d1401ff6670f1a1414b8de6da6e58bec71ad3` |
 | `buyorwait/models.py` | `4de77a7c346f02716d480b254d3c5faa10feae1b5462b972bcb7d24816fb5d7b` |
 | `buyorwait/money.py` | `ca189240477a4fccf6e7149b3829b0523714d57571b166800b28fe4f9dafcb85` |
-| `buyorwait/output.py` | `9798c1550784cf3f22ab83a68fcb4f93876d5b963941a69adbbaf98d09f47768` |
+| `buyorwait/output.py` | `fab9a36ec7b7b46df45735fbfaacfe9176e83311a486f1ccaf8a2551320044d8` |
 | `buyorwait/pipeline.py` | `e3993c47b839af639582cb7d41b6d55e03204140c5bfea07b12de04fd3b6bd2d` |
 | `buyorwait/planning.py` | `ebad9937efd2f873e1eacb7fe81e8a028ca87342d08fd3718a181f4109892889` |
 | `buyorwait/spending.py` | `608530bcf5181d7d5d16c5e5caae0b4acdc037a8d5042ebc77dfc2121468fb50` |

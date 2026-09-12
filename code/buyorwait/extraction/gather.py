@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ..atomic import atomic_write
 from ..evidence import Evidence, validate_many
 from ..models import Dataset, ImageRef, Message
 from .rules import classify_message
@@ -26,6 +27,7 @@ class EvidenceBundle:
     provider: str = "none"
     model: str = "none"
     provider_errors: List[str] = field(default_factory=list)   # "<source_id>: <error>" per failed call
+    cache_notes: List[str] = field(default_factory=list)       # e.g. an unreadable cache that was ignored
 
     def for_user(self, user_id: str) -> List[Evidence]:
         return [e for e in self.evidence if e.user_id == user_id]
@@ -42,25 +44,43 @@ def _file_hash(path: str) -> str:
     return h.hexdigest()[:24]
 
 
-def _load_cache(path: str) -> Dict[str, Any]:
-    if path and os.path.exists(path):
+def _load_cache(path: str, notes: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Load a JSON cache; a missing file is an empty cache, and so is an unreadable one.
+
+    A truncated or corrupted file (an interrupted writer from before atomic saves, a disk
+    error, a stray edit) must not take the whole run down: it is ignored, recorded in
+    ``notes`` when given, and the run proceeds from an empty cache - exactly what a first
+    run does. The next successful save replaces it atomically.
+    """
+    if not path or not os.path.exists(path):
+        return {}
+    try:
         with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    return {}
+            data = json.load(fh)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        if notes is not None:
+            notes.append(f"{path}: unreadable cache ignored ({type(exc).__name__}); starting from an empty cache")
+        return {}
+    if not isinstance(data, dict):
+        if notes is not None:
+            notes.append(f"{path}: cache is not a JSON object; starting from an empty cache")
+        return {}
+    return data
 
 
 def _save_cache(path: str, cache: Dict[str, Any]) -> None:
+    """Replace the cache atomically: a failure leaves the previous valid file untouched."""
     if not path:
         return
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(cache, fh, indent=1, sort_keys=True)
+    atomic_write(path, lambda fh: json.dump(cache, fh, indent=1, sort_keys=True), mode="w", encoding="utf-8")
 
 
 def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: Optional[str] = DEFAULT_CACHE,
                     escalate_unmatched_messages: bool = True) -> EvidenceBundle:
     from .llm import ModelExtractor, ProviderError, UsageLedger
 
-    cache = _load_cache(cache_path) if cache_path else {}
+    cache_notes: List[str] = []
+    cache = _load_cache(cache_path, cache_notes) if cache_path else {}
     raws: List[Dict[str, Any]] = []
     sources: Dict[str, str] = {}
     provider_errors: List[str] = []
@@ -96,7 +116,7 @@ def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: O
             raws.extend(rule); sources[msg.message_id] = "rules"
 
     # ---- images: cache -> model -> hand-verified golden -----------------------------------
-    golden = _load_cache(IMAGE_GOLDEN)
+    golden = _load_cache(IMAGE_GOLDEN, cache_notes)
     for img in ds.images:
         if not os.path.exists(img.path):
             sources[img.image_id] = "missing-file"
@@ -140,4 +160,4 @@ def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: O
     return EvidenceBundle(keep, rejected, sources, usage.to_json(),
                           provider=extractor.provider if extractor else "none",
                           model=extractor.model if extractor else "none",
-                          provider_errors=provider_errors)
+                          provider_errors=provider_errors, cache_notes=cache_notes)

@@ -46,7 +46,7 @@ INCLUDE_ROOTS = ("code", "README.md")
 EXCLUDE_DIRS = {".venv", "venv", "env", ".env.d", "__pycache__", ".pytest_cache", ".hypothesis",
                 ".git", ".hg", ".svn", "node_modules", ".mypy_cache", ".ruff_cache", ".tox",
                 ".idea", ".vscode", ".ipynb_checkpoints", "build", "dist", ".eggs", ".cache"}
-EXCLUDE_SUFFIXES = (".pyc", ".pyo", ".pyd", ".so", ".o", ".a", ".class", ".zip", ".log", ".gyp",
+EXCLUDE_SUFFIXES = (".pyc", ".pyo", ".pyd", ".so", ".o", ".a", ".class", ".zip", ".log", ".gyp", ".tmp",
                     ".egg-info", ".swp", ".swo", ".bak", ".orig", ".rej", ".DS_Store")
 # Names that must never be shipped, reported by name rather than silently skipped.
 FORBIDDEN_NAMES = {".env", ".env.local", ".env.production", "log.txt", "id_rsa", "id_dsa",
