@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .forecast import SpendingChange, amount_safe_to_pay, earliest_full_payment_date, is_safe, project_flows, simulate
 from .ledger import Ledger
@@ -90,9 +90,33 @@ def installment_eligible(opt: PaymentOption, profile) -> Tuple[bool, str]:
     return True, ""
 
 
-def decide(req: Request, L: Ledger, options: Sequence[PaymentOption]) -> Decision:
+def decide(req: Request, L: Ledger, options: Sequence[PaymentOption],
+           ledger_to: Optional[Callable[[date], Ledger]] = None) -> Decision:
+    """Rank every eligible, safe plan for ``req`` on ledger ``L``.
+
+    ``ledger_to(end)`` rebuilds the same ledger projected to ``end``. It is used only to
+    validate an installment schedule whose last leg falls after ``L.horizon_end``: every
+    listed payment must be checked against the forecast that reaches it (statement: "the
+    user can make every listed payment ... and maintain their preferred minimum balance").
+    Without the factory such a schedule cannot be verified and is rejected, never assumed safe.
+    amount_safe_to_pay, earliest_date_for_full_payment, wait and partial plans stay on the
+    nominal horizon.
+    """
     p = L.profile
     base_flows = project_flows(L)
+    extended: Dict[date, Tuple[Ledger, list]] = {}
+
+    def ledger_for(payments) -> Optional[Tuple[Ledger, list]]:
+        """(ledger, flows) able to verify every payment, or None when nothing can."""
+        last = max(d for d, _ in payments)
+        if last <= L.horizon_end:
+            return L, base_flows
+        if ledger_to is None:
+            return None
+        if last not in extended:
+            Lx = ledger_to(last)
+            extended[last] = (Lx, project_flows(Lx))
+        return extended[last]
     safe = amount_safe_to_pay(L, base_flows, req.requested_amount)
     earliest = earliest_full_payment_date(L, base_flows, req.requested_amount)
     min_bal = simulate(L.opening_balance, base_flows).minimum
@@ -148,14 +172,21 @@ def decide(req: Request, L: Ledger, options: Sequence[PaymentOption]) -> Decisio
         if not ok:
             rejected.append(f"{opt.payment_option_id}: {why}")
             continue
-        if is_safe(L, base_flows, sched):
+        scope = ledger_for(sched)
+        if scope is None:
+            rejected.append(f"{opt.payment_option_id}: final payment {sched[-1][0].isoformat()} is after the "
+                            f"forecast window {L.horizon_end.isoformat()} and cannot be verified")
+            continue
+        Ls, flows_s = scope
+        if is_safe(Ls, flows_s, sched):
             cands.append(Plan("installments", sched, [], opt, opt.total_payable_amount, True))
         else:
-            chs = select_changes(L, sched)
+            chs = select_changes(Ls, sched)
             if chs:
                 cands.append(Plan("installments", sched, chs, opt, opt.total_payable_amount, True))
             else:
-                rejected.append(f"{opt.payment_option_id}: unsafe within the forecast even with spending changes")
+                rejected.append(f"{opt.payment_option_id}: unsafe through its last payment "
+                                f"({sched[-1][0].isoformat()}) even with spending changes")
 
     cands.sort(key=lambda c: c.rank_key())
     best = cands[0] if cands else None

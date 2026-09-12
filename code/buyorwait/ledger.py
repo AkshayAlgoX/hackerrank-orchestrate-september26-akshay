@@ -190,10 +190,19 @@ def _internal_transfer_ids(events: List[Event]) -> set:
     return ids
 
 
-def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[Evidence]) -> Ledger:
+def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[Evidence],
+                 horizon_end: Optional[date] = None) -> Ledger:
+    """Reconstruct the user's position over [request_date, horizon_end].
+
+    ``horizon_end`` defaults to the nominal forecast window (forecast_horizon_end). Planning
+    passes a later date only to validate a payment plan whose own legs fall after that window:
+    the same reconstruction, projected as far as the plan's last payment.
+    """
     p = ds.profiles[user_id]
     home = p.home_currency
     end = forecast_horizon_end(request_date)
+    if horizon_end is not None and horizon_end > end:
+        end = horizon_end
     L = Ledger(profile=p, request_date=request_date, horizon_end=end,
                opening_balance=p.current_available_balance, minimum_balance=p.minimum_balance_to_keep)
     events = ds.events_by_user.get(user_id, [])

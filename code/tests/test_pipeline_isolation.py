@@ -52,10 +52,10 @@ def test_a_request_for_an_unknown_user_does_not_abort_the_batch():
 def test_an_arbitrary_exception_inside_the_engine_is_isolated(monkeypatch):
     real = pipeline.decide
 
-    def poisoned(req, L, options):
+    def poisoned(req, L, options, **kw):
         if req.request_id == "r2":
             raise RuntimeError("synthetic engine failure")
-        return real(req, L, options)
+        return real(req, L, options, **kw)
 
     monkeypatch.setattr(pipeline, "decide", poisoned)
     reqs = [_request(1), _request(2), _request(3)]

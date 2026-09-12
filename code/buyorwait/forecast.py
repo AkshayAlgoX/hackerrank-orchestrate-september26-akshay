@@ -90,9 +90,17 @@ def simulate(opening: Decimal, flows: Sequence[Flow], payments: Sequence[Tuple[d
 
 
 def is_safe(L: Ledger, flows: Sequence[Flow], payments: Sequence[Tuple[date, Decimal]]) -> bool:
-    """True iff the balance never drops below minimum_balance_to_keep inside the horizon."""
-    inside = [(d, a) for d, a in payments if d <= L.horizon_end]
-    return simulate(L.opening_balance, flows, inside).minimum >= L.minimum_balance
+    """True iff the balance never drops below minimum_balance_to_keep with every payment made.
+
+    Every listed payment counts (statement: a recommendation is safe only if the user can make
+    every listed payment and keep the minimum). A payment dated after this ledger's window
+    cannot be verified here, so it fails the check rather than being ignored; planning
+    validates such schedules on a ledger extended to the plan's last leg (see
+    planning.decide / ledger.build_ledger(horizon_end=...)).
+    """
+    if any(d > L.horizon_end for d, _ in payments):
+        return False
+    return simulate(L.opening_balance, flows, payments).minimum >= L.minimum_balance
 
 
 def amount_safe_to_pay(L: Ledger, flows: Sequence[Flow], requested: Decimal) -> Decimal:

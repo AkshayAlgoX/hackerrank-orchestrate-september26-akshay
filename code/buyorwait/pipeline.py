@@ -45,8 +45,12 @@ def fallback_row(req: Request, exc: BaseException) -> OutputRow:
 
 
 def decide_request(ds: Dataset, req: Request, bundle: EvidenceBundle) -> Decision:
-    L = build_ledger(ds, req.user_id, req.request_date, bundle.for_user(req.user_id))
-    return decide(req, L, ds.options_by_request.get(req.request_id, []))
+    evidence = bundle.for_user(req.user_id)
+    L = build_ledger(ds, req.user_id, req.request_date, evidence)
+    # Same reconstruction projected further, used only to verify an installment plan whose
+    # last leg falls after the nominal forecast window.
+    ledger_to = lambda end: build_ledger(ds, req.user_id, req.request_date, evidence, horizon_end=end)  # noqa: E731
+    return decide(req, L, ds.options_by_request.get(req.request_id, []), ledger_to=ledger_to)
 
 
 def proof_of(dec: Decision, bundle: EvidenceBundle) -> Dict[str, Any]:
