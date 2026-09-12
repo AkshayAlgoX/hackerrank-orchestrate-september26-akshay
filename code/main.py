@@ -76,6 +76,8 @@ def main(argv=None) -> int:
              "output_bytes": os.path.getsize(out),
              "proofs": os.path.abspath(a.proofs) if a.proofs else None,
              "provider_errors": result.bundle.provider_errors,
+             "recovery": {k: v for k, v in result.bundle.recovery.items() if k != "details"},
+             "recovery_details": result.bundle.recovery.get("details", []),
              "fallback_rows": result.errors,
              # reproducibility: hashes of the engine files this run executed (no secrets)
              "engine_fingerprint": engine_fingerprint(),
@@ -83,8 +85,10 @@ def main(argv=None) -> int:
              "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     atomic_write(usage_path, lambda fh: json.dump(usage, fh, indent=1), mode="w", encoding="utf-8")
     print(f"wrote {len(result.rows)} rows -> {out}")
+    rec = result.bundle.recovery
     print(f"evidence: provider={result.bundle.provider} model={result.bundle.model} "
-          f"sources={_counts(result.bundle.sources)} rejected={len(result.bundle.rejected)}")
+          f"sources={_counts(result.bundle.sources)} rejected={len(result.bundle.rejected)} "
+          f"recovery: entered={rec.get('entered', 0)} calls={rec.get('calls', 0)} recovered={rec.get('recovered', 0)}")
     if result.errors:
         print(f"FALLBACK ROWS for {len(result.errors)} request(s) whose evaluation raised "
               f"(conservative not_affordable/not_recommended written):", file=sys.stderr)

@@ -1,6 +1,6 @@
 # Token usage and cost report
 
-Generated: 2026-09-12 20:59:02Z
+Generated: 2026-09-12 21:41:27Z
 
 This file summarises **the final full-dataset run that produced `output.csv`**.
 
@@ -61,7 +61,7 @@ conservatively prices them as regular input tokens.
 
 ## Reproducibility fingerprint
 
-Combined sha256 over the engine files: `f6cee02e771da3e12463a02ce9f1e74cc13e5fc0a4a05ddbde2a7350fe5b65e5`
+Combined sha256 over the engine files: `b40bd00c9785252050a8a0f1340265f60aa2d56beb93f20238690fc9e071499a`
 
 | File | SHA-256 |
 |---|---|
@@ -71,8 +71,8 @@ Combined sha256 over the engine files: `f6cee02e771da3e12463a02ce9f1e74cc13e5fc0
 | `buyorwait/evidence.py` | `780d04d10be8e3c8c7ef2998deb6170eb890f1f07a63619d55015e63c16674bd` |
 | `buyorwait/explain.py` | `81b5a88d7199470ffdf354336367f2bdb385cf6eea4c3fc00f9f9f652d5ced6e` |
 | `buyorwait/extraction/__init__.py` | `469f5e2d894b2458312a16699e07b2a7e901fb1f9d7cb9b1907088efdf4fba15` |
-| `buyorwait/extraction/gather.py` | `992149da2de076a4203bee6821ea945876f457e35c03d7d5ea484b5bb5a8bcdf` |
-| `buyorwait/extraction/llm.py` | `972edd397c91c398d336929418dbebad3b5cbeaeac9f59c8c5f54ff87edab949` |
+| `buyorwait/extraction/gather.py` | `46cf4b648cdf943c863d23c52392663a0dd3e09b9a54f07e10a67ade09a8aaf9` |
+| `buyorwait/extraction/llm.py` | `e51bf29a64345d473a8778dbd4ecf324bd5d97f0b84bb3099818527d0d3e5be0` |
 | `buyorwait/extraction/rules.py` | `924c5d48bde5d186ba35e1850ae1d7ab085cc56ec56338017f9ceb9c11746677` |
 | `buyorwait/fingerprint.py` | `c7e07deca4f454c8eb445379923556f3c55a1012839ea7f14ee3e1e0b926571a` |
 | `buyorwait/forecast.py` | `e9ba6c253e3ef6a83026234b6659923404b0b488fb5d22aacda6cdde1b3031ae` |
@@ -86,7 +86,7 @@ Combined sha256 over the engine files: `f6cee02e771da3e12463a02ce9f1e74cc13e5fc0
 | `buyorwait/planning.py` | `ebad9937efd2f873e1eacb7fe81e8a028ca87342d08fd3718a181f4109892889` |
 | `buyorwait/spending.py` | `608530bcf5181d7d5d16c5e5caae0b4acdc037a8d5042ebc77dfc2121468fb50` |
 | `evaluation/golden/image_extraction_golden.json` | `a79a72a4d0696e45cd5433887bb0a018e4d403b9bae85fcaba176cb371fc05e5` |
-| `main.py` | `c955c12042f982d5dfe609296ddb5731f52dc5c4565b7e3a76623b4df77736f1` |
+| `main.py` | `a6649adaa7d173e2af1026b873ed571e34d2a5911a3909ae912d59ddbf8715a9` |
 
 ## Reproducing this run
 

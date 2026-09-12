@@ -28,6 +28,11 @@ class EvidenceBundle:
     model: str = "none"
     provider_errors: List[str] = field(default_factory=list)   # "<source_id>: <error>" per failed call
     cache_notes: List[str] = field(default_factory=list)       # e.g. an unreadable cache that was ignored
+    # Bounded evidence recovery counters (see _validated_or_recovered). "entered" counts sources
+    # whose fresh model extraction failed validation; "calls" is the number of recovery calls
+    # actually made (at most one per such source); a normal offline run keeps all of these at 0.
+    recovery: Dict[str, Any] = field(default_factory=lambda: {"entered": 0, "calls": 0, "recovered": 0,
+                                                              "rejected": 0, "skipped_unsupported": 0, "details": []})
 
     def for_user(self, user_id: str) -> List[Evidence]:
         return [e for e in self.evidence if e.user_id == user_id]
@@ -75,6 +80,61 @@ def _save_cache(path: str, cache: Dict[str, Any]) -> None:
     atomic_write(path, lambda fh: json.dump(cache, fh, indent=1, sort_keys=True), mode="w", encoding="utf-8")
 
 
+def _validated_or_recovered(extractor, source_id: str, raws: List[Dict[str, Any]], recovery: Dict[str, Any],
+                            provider_errors: List[str]) -> List[Dict[str, Any]]:
+    """Deterministic firewall around a fresh model extraction.
+
+    Every raw item goes through validate_many exactly as before. If all pass, nothing else
+    happens (the normal path is unchanged). If some fail and the transport supports native
+    tool calling, ONE recovery call may re-express the failed items; its output goes through
+    the very same validate_many. Whatever still fails is rejected exactly as it would have been
+    without recovery. The returned list contains raw dicts only; validation is repeated on the
+    whole bundle later, so nothing bypasses the normal pipeline.
+    """
+    from ..evidence import validate_many as _validate
+    from .llm import MAX_RECOVERY_CALLS, ProviderError
+    ok, errors = _validate(raws)
+    if not errors:
+        return raws
+    # split raws into the ones that validated and the ones that did not (validate_many keeps order)
+    kept, invalid = [], []
+    for r in raws:
+        good, _ = _validate([r])
+        (kept if good else invalid).append(r)
+    recovery["entered"] += 1
+    entry = {"source_id": source_id, "errors": list(errors), "outcome": "", "calls": 0}
+    recovery["details"].append(entry)
+    # Without recovery (or when it fails) the invalid items stay in the list: the final
+    # validate_many rejects and records them exactly as it always has.
+    if extractor is None or not extractor.supports_recovery:
+        recovery["skipped_unsupported"] += 1
+        entry["outcome"] = "skipped: transport has no tool calling; invalid items rejected"
+        return kept + invalid
+    calls = 0
+    try:
+        calls += 1
+        assert calls <= MAX_RECOVERY_CALLS
+        recovery["calls"] += 1
+        entry["calls"] = calls
+        candidates = extractor.recover(invalid, errors)
+    except ProviderError as exc:
+        provider_errors.append(f"{source_id} (recovery): {exc}")
+        recovery["rejected"] += 1
+        entry["outcome"] = f"provider error during recovery: {type(exc).__name__}; invalid items rejected"
+        return kept + invalid
+    good, again = _validate(candidates)
+    accepted = [c for c in candidates if not _validate([c])[1]]
+    if accepted:
+        recovery["recovered"] += 1
+        entry["outcome"] = f"recovered {len(accepted)} fact(s)" + (f"; {len(again)} still invalid" if again else "")
+    else:
+        recovery["rejected"] += 1
+        entry["outcome"] = "recovery produced no valid fact; invalid items rejected"
+    entry["recovery_errors"] = again
+    # a successful repair supersedes the invalid originals; otherwise they are rejected as before
+    return kept + accepted if accepted else kept + invalid
+
+
 def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: Optional[str] = DEFAULT_CACHE,
                     escalate_unmatched_messages: bool = True) -> EvidenceBundle:
     from .llm import ModelExtractor, ProviderError, UsageLedger
@@ -84,6 +144,7 @@ def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: O
     raws: List[Dict[str, Any]] = []
     sources: Dict[str, str] = {}
     provider_errors: List[str] = []
+    recovery: Dict[str, Any] = {"entered": 0, "calls": 0, "recovered": 0, "rejected": 0, "skipped_unsupported": 0, "details": []}
     usage = UsageLedger()
     extractor = None
     if use_model is None:
@@ -111,7 +172,9 @@ def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: O
                 provider_errors.append(f"{msg.message_id}: {exc}")
                 raws.extend(rule); sources[msg.message_id] = "rules-after-provider-error"
             else:
-                cache[key] = out; raws.extend(out); sources[msg.message_id] = "model"
+                out = _validated_or_recovered(extractor, msg.message_id, out, recovery, provider_errors)
+                cache[key] = out; raws.extend(out)
+                sources[msg.message_id] = "model+recovery" if recovery["details"] and recovery["details"][-1]["source_id"] == msg.message_id else "model"
         else:
             raws.extend(rule); sources[msg.message_id] = "rules"
 
@@ -134,7 +197,9 @@ def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: O
                 provider_errors.append(f"{img.image_id}: {exc}")
                 model_failed = True           # fall through to the hand-verified golden, if any
             else:
-                cache[key] = out; raws.extend(out); sources[img.image_id] = "model"
+                out = _validated_or_recovered(extractor, img.image_id, out, recovery, provider_errors)
+                cache[key] = out; raws.extend(out)
+                sources[img.image_id] = "model+recovery" if recovery["details"] and recovery["details"][-1]["source_id"] == img.image_id else "model"
                 continue
         if img.image_id in golden and golden[img.image_id].get("sha256") == _file_hash(img.path) \
                 and golden[img.image_id].get("related_event_id") == img.related_event_id:
@@ -160,4 +225,4 @@ def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: O
     return EvidenceBundle(keep, rejected, sources, usage.to_json(),
                           provider=extractor.provider if extractor else "none",
                           model=extractor.model if extractor else "none",
-                          provider_errors=provider_errors, cache_notes=cache_notes)
+                          provider_errors=provider_errors, cache_notes=cache_notes, recovery=recovery)
