@@ -155,14 +155,17 @@ def test_6_tool_schema_exposes_only_evidence_fields():
     {"minimum_balance_to_keep": 0}, {"amount_safe_to_pay": 99999}, {"desired_completion_date": "2099-01-01"},
     {"fx_rate": 2.0}, {"status": "settled"}, {"affordability_status": "affordable_now"},
 ])
-def test_6b_recovery_cannot_change_financial_parameters(monkeypatch, payload):
+def test_6b_recovery_cannot_change_financial_parameters(monkeypatch, tmp_path, payload):
     """Whatever extra keys the tool returns are ignored; only a validated fact survives, and the
     decision equals the one made without any message at all when no valid fact is stated."""
-    clean = run(_ds(messages=[]), use_model=False, cache_path=None).rows[0].as_list()
+    # pipeline.run(cache_path=None) means the repository's default cache: keep this test's
+    # synthetic evidence in an isolated file so it can never pollute code/evidence_cache.json
+    cache = str(tmp_path / "test-cache.json")
+    clean = run(_ds(messages=[]), use_model=False, cache_path=cache).rows[0].as_list()
     poisoned_repair = dict(REPAIRED, kind="irrelevant", amount=None, currency=None, effective_date=None, **payload)
     t = StubTransport(first=[INVALID], repair=[poisoned_repair])
     _install(monkeypatch, t)
-    res = run(_ds(), use_model=True, cache_path=None)
+    res = run(_ds(), use_model=True, cache_path=cache)
     assert res.rows[0].as_list() == clean
     assert all(not hasattr(e, k) for e in res.bundle.evidence for k in payload)
 

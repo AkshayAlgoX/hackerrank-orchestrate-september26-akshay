@@ -142,10 +142,12 @@ def decide(req: Request, L: Ledger, options: Sequence[PaymentOption],
     # wait for the earliest safe full-payment date
     if accepts_full and earliest is not None and earliest > rd:
         ok, why = completes_by_deadline([(earliest, amt)], deadline)
-        if ok:
+        if ok and is_safe(L, base_flows, [(earliest, amt)]):
             cands.append(Plan("wait", [(earliest, amt)], [], None, amt, True))
-        else:
+        elif not ok:
             rejected.append(f"wait: {why}")
+        else:
+            rejected.append("wait: balance drops below minimum_balance_to_keep before the payment date")
 
     # partial: safe today + remainder on earliest date (spec-mandated shape)
     if req.allows_partial_payment and "partial_payment" in p.payment_methods:

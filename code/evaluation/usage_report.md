@@ -1,6 +1,6 @@
 # Token usage and cost report
 
-Generated: 2026-09-12 21:41:27Z
+Generated: 2026-09-12 23:11:34Z
 
 This file summarises **the final full-dataset run that produced `output.csv`**.
 
@@ -61,7 +61,7 @@ conservatively prices them as regular input tokens.
 
 ## Reproducibility fingerprint
 
-Combined sha256 over the engine files: `b40bd00c9785252050a8a0f1340265f60aa2d56beb93f20238690fc9e071499a`
+Combined sha256 over the engine files: `525e9af5abc09842f38d51d47807f614acd03c69532aa17f747fae3c05b48dcb`
 
 | File | SHA-256 |
 |---|---|
@@ -83,7 +83,7 @@ Combined sha256 over the engine files: `b40bd00c9785252050a8a0f1340265f60aa2d56b
 | `buyorwait/money.py` | `ca189240477a4fccf6e7149b3829b0523714d57571b166800b28fe4f9dafcb85` |
 | `buyorwait/output.py` | `fab9a36ec7b7b46df45735fbfaacfe9176e83311a486f1ccaf8a2551320044d8` |
 | `buyorwait/pipeline.py` | `cd24baa392295b414de7966b919738564345056d0c180023bd29ed2e0c64c3bd` |
-| `buyorwait/planning.py` | `ebad9937efd2f873e1eacb7fe81e8a028ca87342d08fd3718a181f4109892889` |
+| `buyorwait/planning.py` | `a64843ed540790c98fb5f1a43c0a91589489e31bcf7ef2699a44df289eaec111` |
 | `buyorwait/spending.py` | `608530bcf5181d7d5d16c5e5caae0b4acdc037a8d5042ebc77dfc2121468fb50` |
 | `evaluation/golden/image_extraction_golden.json` | `a79a72a4d0696e45cd5433887bb0a018e4d403b9bae85fcaba176cb371fc05e5` |
 | `main.py` | `a6649adaa7d173e2af1026b873ed571e34d2a5911a3909ae912d59ddbf8715a9` |
