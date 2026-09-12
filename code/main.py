@@ -20,6 +20,7 @@ hand-verified image readings). `--provider-check` sends one tiny extraction and 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -29,6 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
+from buyorwait.atomic import atomic_write  # noqa: E402
 from buyorwait.fingerprint import engine_fingerprint  # noqa: E402
 from buyorwait.loaders import load_dataset  # noqa: E402
 from buyorwait.output import write_csv  # noqa: E402
@@ -58,22 +60,28 @@ def main(argv=None) -> int:
     result = run(ds, use_model=use_model)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     write_csv(out, result.rows)
+    # Bind the run metadata to the bytes that were actually written: the report tooling refuses
+    # to describe an output.csv whose digest differs from the one recorded here.
+    output_sha256 = sha256_of(out)
     if a.proofs:
         write_proofs(a.proofs, result)
     usage_path = a.usage or os.path.join(HERE, "evaluation", "reports", "usage_last_run.json")
-    os.makedirs(os.path.dirname(usage_path), exist_ok=True)
-    with open(usage_path, "w", encoding="utf-8") as fh:
-        json.dump({"provider": result.bundle.provider, "model": result.bundle.model, "requests": len(ds.requests),
-                   "usage": result.bundle.usage, "sources": result.bundle.sources,
-                   "rejected_evidence": result.bundle.rejected,
-                   # context for evaluation/write_usage_report.py: which run these numbers describe
-                   "dataset": os.path.abspath(a.dataset), "requests_file": requests_file,
-                   "output": os.path.abspath(out),
-                   "provider_errors": result.bundle.provider_errors,
-                   "fallback_rows": result.errors,
-                   # reproducibility: hashes of the engine files this run executed (no secrets)
-                   "engine_fingerprint": engine_fingerprint(),
-                   "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, fh, indent=1)
+    usage = {"provider": result.bundle.provider, "model": result.bundle.model, "requests": len(ds.requests),
+             "usage": result.bundle.usage, "sources": result.bundle.sources,
+             "rejected_evidence": result.bundle.rejected,
+             # context for evaluation/write_usage_report.py: which run these numbers describe
+             "dataset": os.path.abspath(a.dataset), "requests_file": requests_file,
+             "output": os.path.abspath(out),
+             "output_sha256": output_sha256, "output_rows": len(result.rows),
+             "output_bytes": os.path.getsize(out),
+             "proofs": os.path.abspath(a.proofs) if a.proofs else None,
+             "provider_errors": result.bundle.provider_errors,
+             "fallback_rows": result.errors,
+             # reproducibility: hashes of the engine files this run executed (no secrets)
+             "engine_fingerprint": engine_fingerprint(),
+             "status": "complete",
+             "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    atomic_write(usage_path, lambda fh: json.dump(usage, fh, indent=1), mode="w", encoding="utf-8")
     print(f"wrote {len(result.rows)} rows -> {out}")
     print(f"evidence: provider={result.bundle.provider} model={result.bundle.model} "
           f"sources={_counts(result.bundle.sources)} rejected={len(result.bundle.rejected)}")
@@ -88,6 +96,14 @@ def main(argv=None) -> int:
             print(f"  {rid}: {errs}", file=sys.stderr)
         return 2
     return 0
+
+
+def sha256_of(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def provider_check() -> int:

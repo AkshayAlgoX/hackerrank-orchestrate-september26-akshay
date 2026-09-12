@@ -22,6 +22,7 @@ does not describe a full-dataset run.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -31,6 +32,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CODE = os.path.dirname(HERE)
 ROOT = os.path.dirname(CODE)
 sys.path.insert(0, CODE)
+
+from buyorwait.atomic import atomic_write  # noqa: E402
 from buyorwait.extraction.llm import PRICING_PER_MTOK  # noqa: E402
 
 MARKER = "# Token usage and cost report"
@@ -46,6 +49,46 @@ def _rows_in(path: str) -> int:
     if not body:
         return 0
     return max(0, len(body.splitlines()) - 1)
+
+
+def sha256_of(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def binding_problems(usage: dict, output: str) -> list:
+    """Why ``usage`` must NOT be reported against ``output``; empty when they belong together.
+
+    The production run records the SHA-256 and row count of the output.csv it wrote. A report
+    is only generated when the output on disk still has exactly those bytes: a newer output
+    with older metadata (a run that died before writing the metadata, or a stale JSON from an
+    earlier run) is a split-brain artefact set and is refused rather than described.
+    """
+    problems = []
+    recorded = usage.get("output_sha256")
+    if not recorded:
+        problems.append("run metadata is incomplete: no output_sha256 recorded (the run did not finish "
+                        "writing usage_last_run.json, or it predates hash binding); re-run code/main.py")
+        return problems
+    if usage.get("status") not in (None, "complete"):
+        problems.append(f"run metadata status is {usage.get('status')!r}, not a completed run")
+    if not output or not os.path.exists(output):
+        problems.append(f"{output}: output.csv missing, cannot verify the recorded output_sha256")
+        return problems
+    actual = sha256_of(output)
+    if actual != recorded:
+        problems.append(f"{output}: SHA-256 {actual[:16]}... differs from the run metadata "
+                        f"({recorded[:16]}...): output.csv was produced by a different run than "
+                        f"usage_last_run.json; re-run code/main.py so both come from one run")
+    rows = usage.get("output_rows")
+    if rows is not None:
+        actual_rows = _rows_in(output)
+        if actual_rows != rows:
+            problems.append(f"{output}: {actual_rows} rows on disk but the run metadata recorded {rows}")
+    return problems
 
 
 def gather_context(usage: dict, dataset: str, output: str, usage_path: str) -> dict:
@@ -96,6 +139,12 @@ def integrity(usage: dict, ctx: dict) -> list:
     total_calls = sum(r.get("calls", 0) for r in per_model.values())
     if provider != "none" and total_calls == 0:
         checks.append((False, "a provider is configured but the run recorded zero model calls"))
+
+    bound = binding_problems(usage, ctx.get("output_path") or "")
+    if bound:
+        checks.extend((False, m) for m in bound)
+    else:
+        checks.append((True, f"output.csv SHA-256 matches the run metadata: {usage.get('output_sha256')}"))
     return checks
 
 
@@ -291,11 +340,25 @@ def main(argv=None) -> int:
             print("  ERROR", p)
         print("->", "PASS" if res["ok"] else "FAIL")
         return 0 if res["ok"] else 1
-    with open(a.usage, encoding="utf-8") as fh:
-        usage = json.load(fh)
+    if not os.path.exists(a.usage):
+        print(f"ERROR {a.usage}: no run metadata; run code/main.py first", file=sys.stderr)
+        return 2
+    try:
+        with open(a.usage, encoding="utf-8") as fh:
+            usage = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"ERROR {a.usage}: unreadable run metadata ({exc}); re-run code/main.py", file=sys.stderr)
+        return 2
+    # Refuse to describe an output.csv the metadata was not written for.
+    bound = binding_problems(usage, a.predictions)
+    if bound:
+        for m in bound:
+            print("  ERROR", m, file=sys.stderr)
+        print("-> REFUSED: usage_report.md not written (run metadata does not match output.csv)", file=sys.stderr)
+        return 2
     ctx = gather_context(usage, a.dataset, a.predictions, a.usage)
-    with open(a.out, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(render(usage, ctx))
+    text = render(usage, ctx)
+    atomic_write(a.out, lambda fh: fh.write(text), mode="w", encoding="utf-8", newline="\n")
     bad = [m for ok, m in integrity(usage, ctx) if not ok]
     print(f"wrote {a.out}")
     for m in bad:

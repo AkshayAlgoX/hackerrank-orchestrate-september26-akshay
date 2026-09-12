@@ -38,7 +38,16 @@ def repo(tmp_path):
     return {"dir": ds, "output": str(out), "usage": str(usage_path)}
 
 
+def _bind(repo, usage):
+    """Stamp the run metadata with the digest/row count of this repo's output, as main.py does."""
+    usage["output_sha256"] = wur.sha256_of(repo["output"])
+    usage["output_rows"] = wur._rows_in(repo["output"])
+    usage["status"] = "complete"
+    return usage
+
+
 def _ctx(repo, usage):
+    _bind(repo, usage)
     return wur.gather_context(usage, str(repo["dir"]), repo["output"], repo["usage"])
 
 
@@ -134,7 +143,7 @@ def test_provider_configured_but_zero_calls_fails_integrity(repo):
 
 
 def test_check_detects_a_stale_report(repo):
-    usage = _usage()
+    usage = _bind(repo, _usage())
     with open(repo["usage"], "w", encoding="utf-8") as fh:
         json.dump(usage, fh)
     report = os.path.join(os.path.dirname(repo["usage"]), "usage_report.md")
@@ -146,7 +155,7 @@ def test_check_detects_a_stale_report(repo):
 
 
 def test_check_passes_after_a_fresh_render(repo):
-    usage = _usage()
+    usage = _bind(repo, _usage())
     with open(repo["usage"], "w", encoding="utf-8") as fh:
         json.dump(usage, fh)
     report = os.path.join(os.path.dirname(repo["usage"]), "usage_report.md")
@@ -163,7 +172,7 @@ def test_check_reports_a_missing_usage_json(repo):
 
 
 def test_check_cli_exit_codes(repo):
-    usage = _usage()
+    usage = _bind(repo, _usage())
     with open(repo["usage"], "w", encoding="utf-8") as fh:
         json.dump(usage, fh)
     report = os.path.join(os.path.dirname(repo["usage"]), "usage_report.md")

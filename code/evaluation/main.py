@@ -20,6 +20,7 @@ ROOT = os.path.dirname(CODE)
 sys.path.insert(0, CODE)
 sys.path.insert(0, HERE)
 
+from buyorwait.atomic import atomic_write  # noqa: E402
 from buyorwait.loaders import load_dataset  # noqa: E402
 from buyorwait.output import write_csv  # noqa: E402
 from buyorwait.pipeline import run  # noqa: E402
@@ -74,8 +75,7 @@ def main(argv=None) -> int:
     if a.output:
         report["full_output_contract"] = validate(a.output, a.dataset, "requests.csv")
 
-    with open(os.path.join(REPORTS, "evaluation_report.json"), "w", encoding="utf-8") as fh:
-        json.dump(report, fh, indent=1)
+    atomic_write(os.path.join(REPORTS, "evaluation_report.json"), lambda fh: json.dump(report, fh, indent=1))
     _write_md(report)
     ok = report["samples_contract"]["ok"] and report["adversarial"]["passed"] == report["adversarial"]["total"] \
         and (a.output is None or report["full_output_contract"]["ok"])
@@ -139,8 +139,7 @@ def _write_md(report):
         lines += ["", f"## Full output contract: {'OK' if c['ok'] else 'FAIL'} ({c.get('rows')} rows / {c.get('expected_rows')} expected)", ""]
         for p in c["problems"][:100]:
             lines.append(f"- {p}")
-    with open(os.path.join(REPORTS, "evaluation_report.md"), "w", encoding="utf-8") as fh:
-        fh.write("\n".join(lines) + "\n")
+    atomic_write(os.path.join(REPORTS, "evaluation_report.md"), lambda fh: fh.write("\n".join(lines) + "\n"))
 
 
 if __name__ == "__main__":

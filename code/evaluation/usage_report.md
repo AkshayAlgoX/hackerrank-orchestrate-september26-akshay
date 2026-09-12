@@ -1,6 +1,6 @@
 # Token usage and cost report
 
-Generated: 2026-09-12 20:38:25Z
+Generated: 2026-09-12 20:59:02Z
 
 This file summarises **the final full-dataset run that produced `output.csv`**.
 
@@ -53,6 +53,7 @@ conservatively prices them as regular input tokens.
 - PASS - output.csv has one row per request: 250
 - PASS - provider recorded: none (model none)
 - PASS - every model that was called has known pricing
+- PASS - output.csv SHA-256 matches the run metadata: 4b2f61af4e8306e9c3cff47ba7af75dcbb3f3a05ed9c9bfce0f8cc5284d718c6
 
 - usage JSON: `code/evaluation/reports/usage_last_run.json`
 - dataset: `dataset/requests.csv` (250 rows)
@@ -60,7 +61,7 @@ conservatively prices them as regular input tokens.
 
 ## Reproducibility fingerprint
 
-Combined sha256 over the engine files: `615fc97de598b8f1ef0b996d7bd4e84201ef7bbea4d20cec3168c13cabf59402`
+Combined sha256 over the engine files: `f6cee02e771da3e12463a02ce9f1e74cc13e5fc0a4a05ddbde2a7350fe5b65e5`
 
 | File | SHA-256 |
 |---|---|
@@ -81,11 +82,11 @@ Combined sha256 over the engine files: `615fc97de598b8f1ef0b996d7bd4e84201ef7bbe
 | `buyorwait/models.py` | `4de77a7c346f02716d480b254d3c5faa10feae1b5462b972bcb7d24816fb5d7b` |
 | `buyorwait/money.py` | `ca189240477a4fccf6e7149b3829b0523714d57571b166800b28fe4f9dafcb85` |
 | `buyorwait/output.py` | `fab9a36ec7b7b46df45735fbfaacfe9176e83311a486f1ccaf8a2551320044d8` |
-| `buyorwait/pipeline.py` | `e3993c47b839af639582cb7d41b6d55e03204140c5bfea07b12de04fd3b6bd2d` |
+| `buyorwait/pipeline.py` | `cd24baa392295b414de7966b919738564345056d0c180023bd29ed2e0c64c3bd` |
 | `buyorwait/planning.py` | `ebad9937efd2f873e1eacb7fe81e8a028ca87342d08fd3718a181f4109892889` |
 | `buyorwait/spending.py` | `608530bcf5181d7d5d16c5e5caae0b4acdc037a8d5042ebc77dfc2121468fb50` |
 | `evaluation/golden/image_extraction_golden.json` | `a79a72a4d0696e45cd5433887bb0a018e4d403b9bae85fcaba176cb371fc05e5` |
-| `main.py` | `49cda89c7b8d172cec09f6376956acfe8efd34495220f28d60ec3e4ef3276d9b` |
+| `main.py` | `c955c12042f982d5dfe609296ddb5731f52dc5c4565b7e3a76623b4df77736f1` |
 
 ## Reproducing this run
 

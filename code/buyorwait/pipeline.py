@@ -7,6 +7,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from .atomic import atomic_write
 from .extraction import EvidenceBundle, gather_evidence
 from .forecast import project_flows, simulate
 from .ledger import Ledger, build_ledger
@@ -167,6 +168,5 @@ def run(ds: Dataset, bundle: Optional[EvidenceBundle] = None, use_model: Optiona
 
 
 def write_proofs(path: str, result: RunResult) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(result.proofs, fh, indent=1)
+    """Atomic: a serialization failure leaves the previous proofs file intact."""
+    atomic_write(path, lambda fh: json.dump(result.proofs, fh, indent=1), mode="w", encoding="utf-8")
