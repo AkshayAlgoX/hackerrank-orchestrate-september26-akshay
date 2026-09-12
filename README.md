@@ -43,6 +43,26 @@ python3 code/main.py
 
 After running your solution, confirm that `output.csv` exists in the repository root and contains the required columns and one row for every request.
 
+## Model provider (optional, environment variables only)
+
+The decision engine is deterministic and runs fully offline. A vision-capable model is used only
+as a bounded extraction layer for images and for messages that no rule matches, and only when
+configured through the environment (no key is stored in the repository, cache, logs or reports):
+
+```bash
+export BUYORWAIT_LLM_PROVIDER=openai          # OpenAI-compatible wire format (DeepSeek, OpenAI, gateways); or anthropic; or none
+export BUYORWAIT_LLM_MODEL=<model id>         # e.g. the DeepSeek V4.1-Flash vision model id from your provider console
+export BUYORWAIT_LLM_BASE_URL=https://api.deepseek.com   # default for the openai protocol
+export BUYORWAIT_LLM_API_KEY=...              # or DEEPSEEK_API_KEY / OPENAI_API_KEY (openai) / ANTHROPIC_API_KEY (anthropic)
+export BUYORWAIT_LLM_PRICE_IN=... BUYORWAIT_LLM_PRICE_OUT=...   # USD per 1M tokens, only for evaluation/usage_report.md
+
+python3 code/main.py --provider-check          # one tiny extraction; prints config (key redacted) and token usage
+python3 code/main.py                           # full run; model results are cached by content hash in code/evidence_cache.json
+python3 code/main.py --no-model                # force the offline path
+```
+
+Every model answer is validated against a closed evidence schema before it can influence a decision.
+
 ## Important File Locations
 
 ```text

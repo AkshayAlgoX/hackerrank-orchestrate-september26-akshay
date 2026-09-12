@@ -1,0 +1,6 @@
+# Runtime: standard library only (the OpenAI-compatible model client uses urllib).
+# Optional: only if you select the anthropic wire protocol (BUYORWAIT_LLM_PROVIDER=anthropic)
+# anthropic>=1.5.0   (install only for BUYORWAIT_LLM_PROVIDER=anthropic)
+# dev/test only
+pytest>=8
+hypothesis>=6

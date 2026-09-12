@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from decimal import Decimal as D
 
+import pytest
 from hypothesis import given, settings, strategies as st
 
 from adversarial.cases import mk_dataset, mk_event, mk_profile, mk_request, monthly, run_case
@@ -136,6 +137,44 @@ def test_installment_option_schedule_and_eligibility():
     assert not installment_eligible(opt, mk_profile(max_installment_months=2))[0]
     assert not installment_eligible(opt, mk_profile(max_installment_months=None))[0]
     assert not installment_eligible(opt, mk_profile(payment_methods=("full_payment",)))[0]
+
+
+def test_installment_cadence_is_a_day_count_not_a_calendar_month_step():
+    """Leg k is `first_payment_date + k * payment_frequency_days`, exactly as the samples show.
+
+    Every reference installment plan in sample_requests.csv advances by the option's own day
+    count (28/30/31-day gaps -- e.g. a 30-day option starting 2025-08-08 pays 2025-09-07 and
+    2025-10-07), never by calendar-month steps. A calendar-month rewrite of `schedule()` would
+    give 2026-01-31 -> 2026-02-28 -> 2026-03-31 here and silently stop reproducing the reference.
+    """
+    def sched(n, freq, first, amt="100"):
+        return PaymentOption("payment_option_1", "r1", "installments", D(amt), n, first, freq,
+                             D("0"), D(amt) * n).schedule()
+
+    first, freq = date(2026, 1, 31), 30
+    assert [d for d, _ in sched(4, freq, first)] == [first + timedelta(days=freq * k) for k in range(4)]
+    # a 30-day cadence crosses a month early; a 28-day one enters March when February ends
+    assert [d for d, _ in sched(3, 30, date(2026, 1, 31))] == [date(2026, 1, 31), date(2026, 3, 2), date(2026, 4, 1)]
+    assert [d for d, _ in sched(2, 28, date(2025, 2, 1))] == [date(2025, 2, 1), date(2025, 3, 1)]
+    # the cadence rolls over 31 December without losing or duplicating a leg
+    assert [d for d, _ in sched(3, 30, date(2025, 12, 15))] == [date(2025, 12, 15), date(2026, 1, 14), date(2026, 2, 13)]
+    # N == 1 is the only shape a blank interval takes in the supplied data, and it is unambiguous
+    assert sched(1, None, date(2026, 7, 4)) == [(date(2026, 7, 4), D("100"))]
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "schedule() guards the advance with `if self.payment_frequency_days:`, falsy for None AND "
+    "for 0, so a multi-payment option with a blank interval writes every leg on "
+    "first_payment_date -- which also makes completes_by_deadline trivially true and is "
+    "undetectable by validate_row, since it re-derives its check from the same schedule(). "
+    "Unreachable from dataset/request_payment_options.csv (all 275 blank-frequency rows are "
+    "full_payment with number_of_payments == 1; no row is blank AND multi-payment) and its "
+    "resolution is unresolved: the spec states no default interval and the solved samples show "
+    "only day-count arithmetic, so no replacement cadence is warranted without a decision"))
+def test_blank_frequency_never_stacks_every_leg_on_one_date():
+    opt = PaymentOption("payment_option_1", "r1", "installments", D("100"), 3, date(2026, 1, 31), None, D("0"), D("300"))
+    dates = [d for d, _ in opt.schedule()]
+    assert dates == sorted(set(dates)), f"legs stacked on {dates[0]}"
 
 
 def test_rank_key_follows_exact_order():

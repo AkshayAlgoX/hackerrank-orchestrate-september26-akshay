@@ -1,0 +1,115 @@
+{
+ "_note": "Hand-verified literal readings of dataset/media/images/*.png, keyed by image_id. Used (a) to score VLM extraction and (b) as the offline fallback when no model credentials are configured. Amount = the figure the linked event refers to. Each entry carries the sha256 prefix of the PNG it was read from; the fallback applies only when the file on disk matches, so it is an extraction cache of these specific pictures, never a label for an image id.",
+ "image_01": {
+  "related_event_id": "event_253",
+  "amount": "4365000",
+  "currency": "IDR",
+  "field": "Net Pay (payslip Aug-2019)",
+  "sha256": "f37b40e6af42c66484605725"
+ },
+ "image_02": {
+  "related_event_id": "event_1442",
+  "amount": "100000",
+  "currency": "INR",
+  "field": "Balance Due (rent receipt; total 200000, received 100000)",
+  "sha256": "ccd779e5382b1bcfacfb47d4"
+ },
+ "image_03": {
+  "related_event_id": "event_1545",
+  "amount": "41272",
+  "currency": "INR",
+  "field": "Net Amount / Cash Paid",
+  "sha256": "e5fb0bbcda6cc06f8ea95e32"
+ },
+ "image_04": {
+  "related_event_id": "event_1700",
+  "amount": "2854",
+  "currency": "INR",
+  "field": "Item Bill (order total cropped; delivery fee not visible)",
+  "sha256": "281e7f1e7bd1f98fbd53cde1"
+ },
+ "image_05": {
+  "related_event_id": "event_1786",
+  "amount": "704.05",
+  "currency": "INR",
+  "field": "Amount due till 06-Feb-2026 (822.05 after)",
+  "sha256": "9abcda5647afb3dcdf916132"
+ },
+ "image_06": {
+  "related_event_id": "event_3051",
+  "amount": "1995",
+  "currency": "INR",
+  "field": "Invoice Total",
+  "sha256": "9055551fbe5940feb01b947e"
+ },
+ "image_07": {
+  "related_event_id": "event_3231",
+  "amount": "8528",
+  "currency": "INR",
+  "field": "Grand Total (RS)",
+  "sha256": "f6d30a74355224c0b5cda2d7"
+ },
+ "image_08": {
+  "related_event_id": "event_4535",
+  "amount": "15339",
+  "currency": "INR",
+  "field": "Total Amount Received",
+  "sha256": "e28592ad8b4dacd03055e0b1"
+ },
+ "image_09": {
+  "related_event_id": "event_5170",
+  "amount": "723",
+  "currency": "INR",
+  "field": "Total Amount Received",
+  "sha256": "e0e74e14425d923ff8a5c6db"
+ },
+ "image_10": {
+  "related_event_id": "event_6033",
+  "amount": "79679.26",
+  "currency": "INR",
+  "field": "Balance Due / Total",
+  "sha256": "c90f98caf0877083e471fd47"
+ },
+ "image_11": {
+  "related_event_id": "event_6859",
+  "amount": "3650",
+  "currency": "INR",
+  "field": "Balance (provisional bill, amount paid 0)",
+  "sha256": "795e000d48428c97748e8af3"
+ },
+ "image_12": {
+  "related_event_id": "event_7307",
+  "amount": "33.50",
+  "currency": "USD",
+  "field": "Total (cash paid 40.00, change 6.50)",
+  "sha256": "e10b0123e66d512d82f6c431"
+ },
+ "image_13": {
+  "related_event_id": "event_7941",
+  "amount": "2298",
+  "currency": "INR",
+  "field": "Total paid",
+  "sha256": "1ae54b378a9556d94b753093"
+ },
+ "image_14": {
+  "related_event_id": "event_9421",
+  "amount": "4543",
+  "currency": "INR",
+  "field": "TOTAL (handwritten)",
+  "sha256": "bf88e4aa35e6f36304cbf76b"
+ },
+ "image_15": {
+  "related_event_id": "event_9806",
+  "amount": "9968",
+  "currency": "INR",
+  "field": "Grand Total incl. taxes",
+  "sha256": "0c0fe3d79e670f2b423bbb2a"
+ },
+ "image_16": {
+  "related_event_id": "event_10521",
+  "amount": "393.22",
+  "currency": "INR",
+  "field": "Total",
+  "sha256": "2665cf731a861ddb217be5b8"
+ }
+}
