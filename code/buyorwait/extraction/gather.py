@@ -25,6 +25,7 @@ class EvidenceBundle:
     usage: Dict[str, Any] = field(default_factory=dict)
     provider: str = "none"
     model: str = "none"
+    provider_errors: List[str] = field(default_factory=list)   # "<source_id>: <error>" per failed call
 
     def for_user(self, user_id: str) -> List[Evidence]:
         return [e for e in self.evidence if e.user_id == user_id]
@@ -57,11 +58,12 @@ def _save_cache(path: str, cache: Dict[str, Any]) -> None:
 
 def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: Optional[str] = DEFAULT_CACHE,
                     escalate_unmatched_messages: bool = True) -> EvidenceBundle:
-    from .llm import ModelExtractor, UsageLedger
+    from .llm import ModelExtractor, ProviderError, UsageLedger
 
     cache = _load_cache(cache_path) if cache_path else {}
     raws: List[Dict[str, Any]] = []
     sources: Dict[str, str] = {}
+    provider_errors: List[str] = []
     usage = UsageLedger()
     extractor = None
     if use_model is None:
@@ -81,8 +83,15 @@ def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: O
         if key in cache:
             raws.extend(cache[key]); sources[msg.message_id] = "cache"
         elif extractor is not None:
-            out = extractor.extract_message(msg)
-            cache[key] = out; raws.extend(out); sources[msg.message_id] = "model"
+            try:
+                out = extractor.extract_message(msg)
+            except ProviderError as exc:
+                # transport gave up (after its bounded retries) or answered garbage: the message is
+                # not lost, the deterministic rules result stands and the failure is recorded
+                provider_errors.append(f"{msg.message_id}: {exc}")
+                raws.extend(rule); sources[msg.message_id] = "rules-after-provider-error"
+            else:
+                cache[key] = out; raws.extend(out); sources[msg.message_id] = "model"
         else:
             raws.extend(rule); sources[msg.message_id] = "rules"
 
@@ -94,21 +103,29 @@ def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: O
             continue
         key = "img:" + _hash(img.image_id, _file_hash(img.path), img.related_event_id or "")
         event = ds.events_by_id.get(img.related_event_id) if img.related_event_id else None
+        model_failed = False
         if key in cache:
             raws.extend(cache[key]); sources[img.image_id] = "cache"
-        elif extractor is not None:
-            out = extractor.extract_image(img, event)
-            cache[key] = out; raws.extend(out); sources[img.image_id] = "model"
-        elif img.image_id in golden and golden[img.image_id].get("sha256") == _file_hash(img.path) \
+            continue
+        if extractor is not None:
+            try:
+                out = extractor.extract_image(img, event)
+            except ProviderError as exc:
+                provider_errors.append(f"{img.image_id}: {exc}")
+                model_failed = True           # fall through to the hand-verified golden, if any
+            else:
+                cache[key] = out; raws.extend(out); sources[img.image_id] = "model"
+                continue
+        if img.image_id in golden and golden[img.image_id].get("sha256") == _file_hash(img.path) \
                 and golden[img.image_id].get("related_event_id") == img.related_event_id:
             g = golden[img.image_id]
             raws.append(dict(source_kind="image", source_id=img.image_id, user_id=img.user_id, request_id=img.request_id,
                              related_event_id=img.related_event_id, kind="expense_amount_resolved",
                              amount=g["amount"], currency=g["currency"], confidence=1.0,
                              note=f"hand-verified golden: {g.get('field', '')}"))
-            sources[img.image_id] = "golden"
+            sources[img.image_id] = "golden-after-provider-error" if model_failed else "golden"
         else:
-            sources[img.image_id] = "unresolved"
+            sources[img.image_id] = "unresolved-after-provider-error" if model_failed else "unresolved"
 
     if cache_path:
         _save_cache(cache_path, cache)
@@ -122,4 +139,5 @@ def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: O
         keep.append(e)
     return EvidenceBundle(keep, rejected, sources, usage.to_json(),
                           provider=extractor.provider if extractor else "none",
-                          model=extractor.model if extractor else "none")
+                          model=extractor.model if extractor else "none",
+                          provider_errors=provider_errors)

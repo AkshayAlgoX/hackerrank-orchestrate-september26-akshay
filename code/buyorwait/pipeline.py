@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .extraction import EvidenceBundle, gather_evidence
-from .ledger import build_ledger
+from .forecast import project_flows, simulate
+from .ledger import Ledger, build_ledger
 from .models import Dataset, Request
 from .output import OutputRow, render_row, validate_row
 from .planning import Decision, decide
@@ -53,6 +54,48 @@ def decide_request(ds: Dataset, req: Request, bundle: EvidenceBundle) -> Decisio
     return decide(req, L, ds.options_by_request.get(req.request_id, []), ledger_to=ledger_to)
 
 
+def bottleneck_of(L: Ledger) -> Dict[str, Any]:
+    """The day that binds amount_safe_to_pay: first date on which the projected balance is lowest.
+
+    Derived from the same base path the decision used (project_flows + simulate, no plan, no
+    changes): ``bottleneck_balance - minimum_balance`` is the room that amount_safe_to_pay is
+    capped by. ``bottleneck_event_id`` names the largest debit landing that day when it comes
+    from a dataset row (pending/scheduled) or the latest occurrence of the recurring series that
+    produced it; otherwise it is null. Audit only: no decision reads this.
+    """
+    flows = project_flows(L)
+    path = simulate(L.opening_balance, flows)
+    lowest = path.minimum
+    on = L.request_date
+    for d, bal in path.points:
+        if bal == lowest and bal < L.opening_balance:
+            on = d
+            break
+    else:
+        if path.points and path.points[0][0] == L.request_date and path.points[0][1] == lowest:
+            on = L.request_date
+    same_day = sorted((f for f in flows if f.on == on), key=lambda f: (f.amount, f.label))
+    debits = [f for f in same_day if f.amount < 0]
+    event_id = None
+    if debits:
+        biggest = debits[0]
+        if biggest.source_event_id:
+            event_id = biggest.source_event_id
+        elif biggest.series_id:
+            try:
+                event_id = L.series_by_id(biggest.series_id).latest_event_id
+            except KeyError:
+                event_id = None
+    return {
+        "bottleneck_date": on.isoformat(),
+        "bottleneck_balance": str(lowest),
+        "minimum_balance": str(L.minimum_balance),
+        "headroom": str(lowest - L.minimum_balance),
+        "bottleneck_event_id": event_id,
+        "flows_on_bottleneck_date": [[str(f.amount), f.label, f.source_event_id, f.series_id] for f in same_day],
+    }
+
+
 def proof_of(dec: Decision, bundle: EvidenceBundle) -> Dict[str, Any]:
     """Structured, machine-checkable account of the decision (feeds explanations and audits)."""
     L = dec.ledger
@@ -80,6 +123,10 @@ def proof_of(dec: Decision, bundle: EvidenceBundle) -> Dict[str, Any]:
                             option=c.option.payment_option_id if c.option else None) for c in dec.candidates],
         "rejected": dec.rejected,
         "audit": L.audit,
+        "bottleneck": bottleneck_of(L),
+        "provenance": list(L.provenance),
+        "evidence_sources": {e.source_id: bundle.sources.get(e.source_id, "unknown")
+                             for e in bundle.for_user(dec.request.user_id)},
     }
 
 

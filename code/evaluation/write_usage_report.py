@@ -196,6 +196,27 @@ def render(usage: dict, ctx: dict | None = None) -> str:
         lines += [f"- {r}" for r in usage["rejected_evidence"]]
         lines.append("")
 
+    fp = usage.get("engine_fingerprint") or {}
+    lines += ["## Reproducibility fingerprint", ""]
+    if fp.get("files"):
+        lines += [f"Combined {fp.get('algorithm', 'sha256')} over the engine files: `{fp.get('combined')}`", "",
+                  "| File | SHA-256 |", "|---|---|"]
+        lines += [f"| `{k}` | `{v}` |" for k, v in sorted(fp["files"].items())]
+        lines.append("")
+        if fp.get("current_combined") and fp["current_combined"] != fp.get("combined"):
+            lines += ["**Warning:** the engine files on disk no longer match the run "
+                      f"(now `{fp['current_combined']}`); regenerate output.csv before submitting.", ""]
+    else:
+        lines += ["Not recorded by this run (older usage JSON); re-run code/main.py.", ""]
+    if usage.get("provider_errors"):
+        lines += ["## Provider errors (calls that fell back to rules/golden)", ""]
+        lines += [f"- {e}" for e in usage["provider_errors"]]
+        lines.append("")
+    if usage.get("fallback_rows"):
+        lines += ["## Fallback rows (requests whose evaluation raised)", ""]
+        lines += [f"- {k}: {v}" for k, v in usage["fallback_rows"].items()]
+        lines.append("")
+
     lines += ["## Reproducing this run", "",
               "```bash",
               "python3 code/main.py            # writes output.csv and reports/usage_last_run.json",
@@ -226,6 +247,17 @@ def check_report(usage_path: str = None, report_path: str = None, dataset: str =
     for ok, msg in integrity(usage, ctx):
         if not ok:
             problems.append(msg)
+    fp = usage.get("engine_fingerprint") or {}
+    if fp.get("combined"):
+        try:
+            from buyorwait.fingerprint import engine_fingerprint
+            now = engine_fingerprint()["combined"]
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"could not recompute the engine fingerprint: {exc}")
+        else:
+            if now != fp["combined"]:
+                problems.append("engine files changed since the run that produced output.csv "
+                                f"(run {fp['combined'][:12]}..., now {now[:12]}...); regenerate before submitting")
     if not os.path.exists(report_path):
         problems.append(f"{report_path}: missing (run this tool without --check)")
     else:

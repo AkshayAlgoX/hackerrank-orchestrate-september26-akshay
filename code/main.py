@@ -29,6 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
+from buyorwait.fingerprint import engine_fingerprint  # noqa: E402
 from buyorwait.loaders import load_dataset  # noqa: E402
 from buyorwait.output import write_csv  # noqa: E402
 from buyorwait.pipeline import run, write_proofs  # noqa: E402
@@ -68,6 +69,10 @@ def main(argv=None) -> int:
                    # context for evaluation/write_usage_report.py: which run these numbers describe
                    "dataset": os.path.abspath(a.dataset), "requests_file": requests_file,
                    "output": os.path.abspath(out),
+                   "provider_errors": result.bundle.provider_errors,
+                   "fallback_rows": result.errors,
+                   # reproducibility: hashes of the engine files this run executed (no secrets)
+                   "engine_fingerprint": engine_fingerprint(),
                    "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, fh, indent=1)
     print(f"wrote {len(result.rows)} rows -> {out}")
     print(f"evidence: provider={result.bundle.provider} model={result.bundle.model} "

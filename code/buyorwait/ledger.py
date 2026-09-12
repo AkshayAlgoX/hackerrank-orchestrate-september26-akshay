@@ -15,7 +15,7 @@ import calendar
 from datetime import date, timedelta
 from decimal import Decimal
 from statistics import median
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .classify import income_class, is_lifecycle_one_off
 from .evidence import Evidence
@@ -147,6 +147,20 @@ class Ledger:
     series: List[Series] = field(default_factory=list)
     salary_flows: List[Flow] = field(default_factory=list)
     audit: List[str] = field(default_factory=list)
+    # Evidence provenance: one record per evidence item the reconstruction looked at, with the
+    # normalized fact, whether it was applied, and the deterministic reason when it was not
+    # (conflict rules 1-4). Audit only: nothing reads this back into the decision.
+    provenance: List[Dict[str, Any]] = field(default_factory=list)
+
+    def record(self, ev: "Evidence", applied: bool, effect: str, reason: str = "") -> None:
+        self.provenance.append({
+            "source_type": ev.source_kind, "source_id": ev.source_id, "kind": ev.kind,
+            "fact": {"amount": None if ev.amount is None else str(ev.amount), "currency": ev.currency,
+                     "effective_date": ev.effective_date.isoformat() if ev.effective_date else None,
+                     "percent": None if ev.percent is None else str(ev.percent),
+                     "related_event_id": ev.related_event_id},
+            "sent_at": ev.sent_at, "applied": applied, "effect": effect, "reason": reason,
+        })
 
     def series_by_id(self, sid: str) -> Series:
         for s in self.series:
@@ -165,12 +179,24 @@ def _home_amount(ds: Dataset, e: Event, home: str, resolved: Dict[str, Tuple[Dec
     return convert(ds.fx, amt, e.cash_date, cur, home)
 
 
-def _resolved_amounts(evidence: List[Evidence], events_by_id: Dict[str, Event]) -> Dict[str, Tuple[Decimal, str]]:
+def _resolved_amounts(evidence: List[Evidence], events_by_id: Dict[str, Event],
+                      L: Optional[Ledger] = None) -> Dict[str, Tuple[Decimal, str]]:
     out: Dict[str, Tuple[Decimal, str]] = {}
+    winner: Dict[str, Evidence] = {}
     for ev in sorted(evidence, key=lambda x: x.sent_at):
         if ev.kind == "expense_amount_resolved" and ev.related_event_id in events_by_id:
             e = events_by_id[ev.related_event_id]
+            if e.event_id in winner and L is not None:
+                prev = winner[e.event_id]
+                L.record(prev, False, f"amount for {e.event_id}",
+                         f"superseded by newer record {ev.source_id} from the same source type (conflict rule 2)")
             out[e.event_id] = (q2(ev.amount), ev.currency or e.currency)
+            winner[e.event_id] = ev
+        elif ev.kind == "expense_amount_resolved" and L is not None:
+            L.record(ev, False, "amount resolution", "related event not found in the dataset")
+    if L is not None:
+        for eid, ev in winner.items():
+            L.record(ev, True, f"amount for {eid} = {out[eid][1]} {out[eid][0]}")
     return out
 
 
@@ -207,7 +233,10 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
                opening_balance=p.current_available_balance, minimum_balance=p.minimum_balance_to_keep)
     events = ds.events_by_user.get(user_id, [])
     evid = [e for e in evidence if e.user_id == user_id and e.kind != "scam_or_injection"]
-    resolved = _resolved_amounts(evid, ds.events_by_id)
+    resolved = _resolved_amounts(evid, ds.events_by_id, L)
+    for ev in evidence:
+        if ev.user_id == user_id and ev.kind == "scam_or_injection":
+            L.record(ev, False, "ignored entirely", "embedded instruction or scam (never a financial fact)")
     for e in events:
         if e.amount is None and e.event_id not in resolved and e.direction != "non_cash":
             L.audit.append(f"{e.event_id}: blank amount unresolved; excluded (never treated as zero)")
@@ -260,9 +289,15 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
     settled = [e for e in settled if e.event_id in amounts]
 
     rent_multiplier = Decimal("1")
+    rent_ev: Optional[Evidence] = None
     for ev in sorted(evid, key=lambda x: x.sent_at):
         if ev.kind == "rent_change_percent":
+            if rent_ev is not None:
+                L.record(rent_ev, False, "rent multiplier", f"superseded by newer record {ev.source_id} (conflict rule 2)")
             rent_multiplier = (Decimal("1") + ev.percent / Decimal("100"))
+            rent_ev = ev
+    if rent_ev is not None:
+        L.record(rent_ev, True, f"rent multiplier {rent_multiplier}")
 
     used: set = set()
     by_desc: Dict[Tuple[str, str, str], List[Event]] = defaultdict(list)
@@ -398,13 +433,17 @@ def _project_salary(ds: Dataset, L: Ledger, events: List[Event], evid: List[Evid
             regular = ev.amount; currency = ev.currency or currency
             pay_day = ev.effective_date.day; start_from = ev.effective_date; anchor = None
             terminal = False; ended = False
+            L.record(ev, True, f"recurring salary {currency} {regular} from {start_from.isoformat()}")
         elif ev.kind == "salary_amount_change":
             changed_amount = ev.amount; currency = ev.currency or currency
             change_from = ev.effective_date
             if regular is None:
                 regular = ev.amount
+            L.record(ev, True, f"salary amount {currency} {changed_amount}"
+                     + (f" from {change_from.isoformat()}" if change_from else ""))
         elif ev.kind == "salary_next_amount":
             next_override = ev.amount; currency = ev.currency or currency
+            L.record(ev, True, f"next payroll only {currency} {next_override}")
         elif ev.kind == "arrears_next_payroll":
             # An "arrears with the next payroll" message describes a settled credit when a credit
             # of that exact amount already landed in the 60 days before the request: counting it
@@ -413,15 +452,30 @@ def _project_salary(ds: Dataset, L: Ledger, events: List[Event], evid: List[Evid
                        and rd - timedelta(days=60) <= e.cash_date <= rd]
             if already:
                 L.audit.append(f"{ev.source_id}: arrears {ev.amount} already settled as {already[-1].event_id}; not added again")
+                L.record(ev, False, "one-time arrears", f"already settled as {already[-1].event_id} (conflict rule 1)")
             else:
                 arrears = ev.amount
+                L.record(ev, True, f"one-time arrears {currency} {arrears} with the next payroll")
         elif ev.kind == "salary_date_change":
             pay_day = ev.effective_date.day; start_from = ev.effective_date
+            L.record(ev, True, f"payday moves to day {pay_day} from {start_from.isoformat()}")
         elif ev.kind == "income_ended":
             ended = True
+            L.record(ev, True, "no salary projected")
         elif ev.kind == "one_off_income" and rd <= ev.effective_date <= end:
             amt = convert(ds.fx, ev.amount, ev.effective_date, ev.currency or home, home)
             L.known_flows.append(Flow(ev.effective_date, amt, f"confirmed one-off income ({ev.source_id})", None, None, "income"))
+            L.record(ev, True, f"one-off income {home} {amt} on {ev.effective_date.isoformat()}")
+        elif ev.kind == "one_off_income":
+            L.record(ev, False, "one-off income", "outside the forecast window")
+        elif ev.kind in ("income_unconfirmed", "investment_value_change", "new_recurring_expense_unknown"):
+            L.record(ev, False, "no financial effect",
+                     {"income_unconfirmed": "not cash until it settles",
+                      "investment_value_change": "unrealized value is not cash",
+                      "new_recurring_expense_unknown": "no amount stated; nothing invented"}[ev.kind])
+        elif ev.kind in ("settlement_confirmation", "expense_pending_retry", "duplicate_charge_disputed",
+                         "fx_settlement_note", "separate_card_minimums", "internal_transfer", "irrelevant"):
+            L.record(ev, False, "informational", "confirms or annotates event rows; the rows themselves carry the cash effect")
 
     if regular is None or pay_day is None:
         L.audit.append("no recurring payroll history: no salary projected")
