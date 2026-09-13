@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .classify import income_class, is_lifecycle_one_off
 from .evidence import Evidence
-from .fx import convert
+from .fx import MissingRate, convert
 from .models import Dataset, Event, Profile, HORIZON_DAYS
 from .money import ZERO, q2
 
@@ -63,6 +63,12 @@ def estimate_variable_amount(amts: List[Decimal]) -> Decimal:
     single statistic of the history), so the unbiased mean is used, unrounded.
     """
     return q2(sum(amts, ZERO) / len(amts))
+
+
+def _is_monthly(dates: List[date]) -> bool:
+    """True when every consecutive gap is a calendar month apart (26-35 days): no month skipped."""
+    gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
+    return bool(gaps) and all(MONTHLY_MIN_GAP <= g <= 35 for g in gaps)
 
 
 def _regular_cadence(dates: List[date]) -> Optional[int]:
@@ -169,14 +175,20 @@ class Ledger:
         raise KeyError(sid)
 
 
-def _home_amount(ds: Dataset, e: Event, home: str, resolved: Dict[str, Tuple[Decimal, str]]) -> Optional[Decimal]:
+def _home_amount(ds: Dataset, e: Event, home: str, resolved: Dict[str, Tuple[Decimal, str]],
+                 audit: Optional[list] = None) -> Optional[Decimal]:
     if e.amount is not None:
         amt, cur = e.amount, e.currency
     elif e.event_id in resolved:
         amt, cur = resolved[e.event_id]
     else:
         return None
-    return convert(ds.fx, amt, e.cash_date, cur, home)
+    try:
+        return convert(ds.fx, amt, e.cash_date, cur, home)
+    except MissingRate:
+        if audit is not None:
+            audit.append(f"{e.event_id}: no rates for {cur}->{home}; excluded (never invent a rate)")
+        return None
 
 
 def _resolved_amounts(evidence: List[Evidence], events_by_id: Dict[str, Event],
@@ -257,7 +269,7 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
             L.audit.append(f"{e.event_id}: pending credit ignored")
             continue
         if e.status in ("pending", "scheduled") and e.is_debit:
-            amt = _home_amount(ds, e, home, resolved)
+            amt = _home_amount(ds, e, home, resolved, L.audit)
             if amt is None:
                 continue
             on = max(e.cash_date, request_date)
@@ -269,7 +281,7 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
             # until they settle). The description decides via the shared income classifier;
             # category="salary" alone is not evidence that a scheduled credit is payroll.
             if income_class(e.description) in ("payroll", "payroll_terminal"):
-                amt = _home_amount(ds, e, home, resolved)
+                amt = _home_amount(ds, e, home, resolved, L.audit)
                 if amt is not None and request_date <= e.cash_date <= end:
                     L.salary_flows.append(Flow(e.cash_date, amt, f"scheduled {e.description}", e.event_id, "salary", "salary"))
             else:
@@ -283,7 +295,7 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
     settled = [e for e in settled if e.event_id not in linked_parents]
     amounts: Dict[str, Decimal] = {}
     for e in settled:
-        a = _home_amount(ds, e, home, resolved)
+        a = _home_amount(ds, e, home, resolved, L.audit)
         if a is not None:
             amounts[e.event_id] = a
     settled = [e for e in settled if e.event_id in amounts]
@@ -333,9 +345,25 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
         if e.event_id not in used:
             by_cat[e.category].append(e)
     for cat, es in sorted(by_cat.items()):
+        es.sort(key=lambda x: (x.event_date, x.event_id))
+        # A monthly commitment whose wording changes from month to month (electricity bill /
+        # power utility charge / ...) never forms a description group. The category's own
+        # history still supports recurrence, so it is judged by exactly the monthly rule the
+        # description path applies: at least MIN_FIXED_OCCURRENCES rows, every gap 26-35 days,
+        # no month skipped. Nothing else is inferred - the same bar keeps one-off purchases out.
+        if len(es) >= MIN_FIXED_OCCURRENCES and _is_monthly([e.event_date for e in es]):
+            amts = [amounts[e.event_id] for e in es]
+            amt = amts[-1] if len(set(amts)) == 1 else estimate_variable_amount(amts)
+            if cat == "rent":
+                amt = q2(amt * rent_multiplier)
+            latest = es[-1]
+            sid += 1
+            L.series.append(Series(f"s{sid}", cat, latest.event_type, latest.description, latest.flexibility,
+                                   latest.minimum_allowed_amount, latest.event_id, latest.event_date, amt, None, False, len(es),
+                                   note="monthly cadence across varying descriptions"))
+            continue
         if len(es) < MIN_VARIABLE_OCCURRENCES:
             continue
-        es.sort(key=lambda x: (x.event_date, x.event_id))
         mg = _regular_cadence([e.event_date for e in es])
         if mg is None:
             L.audit.append(f"{cat}: {len(es)} settled rows without a regular cadence; not projected")

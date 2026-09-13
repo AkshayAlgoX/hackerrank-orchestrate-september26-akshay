@@ -272,8 +272,10 @@ def test_fx_conversion_rounds_half_up_to_cents(amount, expected):
 def test_fx_missing_rate_in_a_settled_row_yields_a_fallback_row_not_a_crash():
     ev = base_events() + [mk_event("usd", "expense", "utilities", "debit", 100, RD - timedelta(days=10), currency="USD")]
     res = run(scenario(events=ev), use_model=False, cache_path=None)
-    assert len(res.rows) == 1 and res.rows[0].recommended_payment_method == "not_recommended"
-    assert "MissingRate" in res.errors["r1"]
+    # The unrateable USD event is excluded; the remaining EUR events produce a valid decision
+    assert len(res.rows) == 1
+    assert "r1" not in res.errors
+    assert res.rows[0].recommended_payment_method != "not_recommended"
 
 
 def test_fx_foreign_pending_debit_is_converted_on_its_settlement_date():
