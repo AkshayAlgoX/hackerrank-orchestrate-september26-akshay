@@ -32,37 +32,28 @@ Bounded Probabilistic Perception   +   Deterministic Financial Execution
 ## Data flow
 
 ```
-dataset/*.csv, dataset/media/images/*.png
-        │
-        ▼
-loaders.py ─────────── typed records (Decimal amounts, ISO dates, closed enums)
-        │
-        ▼
-extraction/  rules.py ──► raw evidence dicts ─┐
-             llm.py   ──► raw evidence dicts ─┤ (model, only if configured; content-hash cache)
-             gather.py: golden image readings ┘
-        │
-        ▼
-evidence.py  validate_evidence(): closed vocabulary of 21 kinds, literal field types,
-             positive amounts, ISO dates, known currencies, provenance fields required
-        │
-        ▼
-ledger.py    build_ledger(): opening balance, minimum, forecast window, known future
-             flows by cash state, recurring expense series, projected salary, provenance
-        │
-        ▼
-forecast.py  project_flows() → simulate() → amount_safe_to_pay(), earliest_full_payment_date(),
-             is_safe()   (exact Decimal arithmetic, per-day netting)
-        │
-        ▼
-planning.py  decide(): eligible candidates (full / wait / partial / installments), the
-             deadline gate, spending changes (spending.py), the statement's ranking
-        │
-        ▼
-output.py    render_row() + validate_row() → output.csv (atomic write)
-pipeline.py  proof_of() → proofs JSON; per-request exception isolation
-main.py      usage_last_run.json with output SHA-256, row count, engine fingerprint
+Input
+  → Context
+  → EvidenceAgent
+  → Tool Registry
+  → Validation
+  → Recovery / Abstain
+  → Canonical Evidence
+  → Deterministic Financial Kernel
+  → Decision Proof
+  → Atomic Finalization
 ```
+
+**Model describes; deterministic code decides.**
+The model's only job is to turn one untrusted source into canonical evidence (or abstain).
+The model cannot directly modify:
+- balances
+- FX
+- deadlines
+- lifecycle reconciliation
+- plan ranking
+
+These boundaries exist because the model is an unreliable probabilistic text generator. Allowing it to perform exact arithmetic, rank plans by complex rules, or alter hard constraints leads to unpredictable financial errors. A strict separation ensures the model only describes facts, while the deterministic financial kernel enforces the rules and decides.
 
 Runtime dependencies: the Python standard library. `pytest` and `hypothesis` are needed only
 for the test suite; the `anthropic` SDK only if that wire protocol is selected.

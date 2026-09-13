@@ -33,6 +33,7 @@ class EvidenceBundle:
     # actually made (at most one per such source); a normal offline run keeps all of these at 0.
     recovery: Dict[str, Any] = field(default_factory=lambda: {"entered": 0, "calls": 0, "recovered": 0,
                                                               "rejected": 0, "skipped_unsupported": 0, "details": []})
+    agent_records: List[Dict[str, Any]] = field(default_factory=list)
 
     def for_user(self, user_id: str) -> List[Evidence]:
         return [e for e in self.evidence if e.user_id == user_id]
@@ -137,10 +138,12 @@ def _validated_or_recovered(extractor, source_id: str, raws: List[Dict[str, Any]
 
 def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: Optional[str] = DEFAULT_CACHE,
                     escalate_unmatched_messages: bool = True) -> EvidenceBundle:
+    from .agent import EvidenceAgent
     from .llm import ModelExtractor, ProviderError, UsageLedger
 
     cache_notes: List[str] = []
     cache = _load_cache(cache_path, cache_notes) if cache_path else {}
+    golden = _load_cache(IMAGE_GOLDEN, cache_notes)
     raws: List[Dict[str, Any]] = []
     sources: Dict[str, str] = {}
     provider_errors: List[str] = []
@@ -152,65 +155,28 @@ def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: O
     if use_model:
         extractor = ModelExtractor(usage=usage)   # provider/model/key come from the environment only
 
-    # ---- messages: rules first, model only for unmatched templates ------------------------
-    for msg in ds.messages:
-        rule = classify_message(msg)
-        matched = not (len(rule) == 1 and rule[0]["kind"] == "irrelevant" and rule[0].get("confidence", 1) < 0.5)
-        if matched or not escalate_unmatched_messages:
-            raws.extend(rule)
-            sources[msg.message_id] = "rules"
-            continue
-        key = "msg:" + _hash(msg.message_id, msg.message_text)
-        if key in cache:
-            raws.extend(cache[key]); sources[msg.message_id] = "cache"
-        elif extractor is not None:
-            try:
-                out = extractor.extract_message(msg)
-            except ProviderError as exc:
-                # transport gave up (after its bounded retries) or answered garbage: the message is
-                # not lost, the deterministic rules result stands and the failure is recorded
-                provider_errors.append(f"{msg.message_id}: {exc}")
-                raws.extend(rule); sources[msg.message_id] = "rules-after-provider-error"
-            else:
-                out = _validated_or_recovered(extractor, msg.message_id, out, recovery, provider_errors)
-                cache[key] = out; raws.extend(out)
-                sources[msg.message_id] = "model+recovery" if recovery["details"] and recovery["details"][-1]["source_id"] == msg.message_id else "model"
-        else:
-            raws.extend(rule); sources[msg.message_id] = "rules"
+    agent = EvidenceAgent(extractor, cache, golden, recovery, provider_errors, escalate_unmatched_messages)
 
-    # ---- images: cache -> model -> hand-verified golden -----------------------------------
-    golden = _load_cache(IMAGE_GOLDEN, cache_notes)
+    # ---- messages -------------------------------------------------------------------------
+    for msg in ds.messages:
+        key = "msg:" + _hash(msg.message_id, msg.message_text)
+        outcome = agent.process_message(msg, key)
+        raws.extend(outcome.raws)
+        sources[msg.message_id] = outcome.route
+
+    # ---- images ---------------------------------------------------------------------------
     for img in ds.images:
         if not os.path.exists(img.path):
-            sources[img.image_id] = "missing-file"
+            outcome = agent.process_image(img, None, None, None)
+            raws.extend(outcome.raws)
+            sources[img.image_id] = outcome.route
             continue
-        key = "img:" + _hash(img.image_id, _file_hash(img.path), img.related_event_id or "")
+        fh = _file_hash(img.path)
+        key = "img:" + _hash(img.image_id, fh, img.related_event_id or "")
         event = ds.events_by_id.get(img.related_event_id) if img.related_event_id else None
-        model_failed = False
-        if key in cache:
-            raws.extend(cache[key]); sources[img.image_id] = "cache"
-            continue
-        if extractor is not None:
-            try:
-                out = extractor.extract_image(img, event)
-            except ProviderError as exc:
-                provider_errors.append(f"{img.image_id}: {exc}")
-                model_failed = True           # fall through to the hand-verified golden, if any
-            else:
-                out = _validated_or_recovered(extractor, img.image_id, out, recovery, provider_errors)
-                cache[key] = out; raws.extend(out)
-                sources[img.image_id] = "model+recovery" if recovery["details"] and recovery["details"][-1]["source_id"] == img.image_id else "model"
-                continue
-        if img.image_id in golden and golden[img.image_id].get("sha256") == _file_hash(img.path) \
-                and golden[img.image_id].get("related_event_id") == img.related_event_id:
-            g = golden[img.image_id]
-            raws.append(dict(source_kind="image", source_id=img.image_id, user_id=img.user_id, request_id=img.request_id,
-                             related_event_id=img.related_event_id, kind="expense_amount_resolved",
-                             amount=g["amount"], currency=g["currency"], confidence=1.0,
-                             note=f"hand-verified golden: {g.get('field', '')}"))
-            sources[img.image_id] = "golden-after-provider-error" if model_failed else "golden"
-        else:
-            sources[img.image_id] = "unresolved-after-provider-error" if model_failed else "unresolved"
+        outcome = agent.process_image(img, event, key, fh)
+        raws.extend(outcome.raws)
+        sources[img.image_id] = outcome.route
 
     if cache_path:
         _save_cache(cache_path, cache)
@@ -225,4 +191,5 @@ def gather_evidence(ds: Dataset, use_model: Optional[bool] = None, cache_path: O
     return EvidenceBundle(keep, rejected, sources, usage.to_json(),
                           provider=extractor.provider if extractor else "none",
                           model=extractor.model if extractor else "none",
-                          provider_errors=provider_errors, cache_notes=cache_notes, recovery=recovery)
+                          provider_errors=provider_errors, cache_notes=cache_notes, recovery=recovery,
+                          agent_records=[r.to_json() for r in agent.records])

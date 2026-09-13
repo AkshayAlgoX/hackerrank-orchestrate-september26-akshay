@@ -1,6 +1,6 @@
 # Token usage and cost report
 
-Generated: 2026-09-13 03:12:53Z
+Generated: 2026-09-13 03:54:52Z
 
 This file summarises **the final full-dataset run that produced `output.csv`**.
 
@@ -61,7 +61,7 @@ conservatively prices them as regular input tokens.
 
 ## Reproducibility fingerprint
 
-Combined sha256 over the engine files: `1e42ac5009b4d8ead0b60c98c893eaed6f661bb80369f7304fc74957bb6e173a`
+Combined sha256 over the engine files: `34f8a5a4aeb713bc9ea6c50f7f7ff0f5171df21fa25ffb63b621a9823945af19`
 
 | File | SHA-256 |
 |---|---|
@@ -71,7 +71,8 @@ Combined sha256 over the engine files: `1e42ac5009b4d8ead0b60c98c893eaed6f661bb8
 | `buyorwait/evidence.py` | `780d04d10be8e3c8c7ef2998deb6170eb890f1f07a63619d55015e63c16674bd` |
 | `buyorwait/explain.py` | `81b5a88d7199470ffdf354336367f2bdb385cf6eea4c3fc00f9f9f652d5ced6e` |
 | `buyorwait/extraction/__init__.py` | `469f5e2d894b2458312a16699e07b2a7e901fb1f9d7cb9b1907088efdf4fba15` |
-| `buyorwait/extraction/gather.py` | `46cf4b648cdf943c863d23c52392663a0dd3e09b9a54f07e10a67ade09a8aaf9` |
+| `buyorwait/extraction/agent.py` | `64934b3cb4eb1c97bc76842450220ec832d83ff384a5fbc64e24f8233ff47884` |
+| `buyorwait/extraction/gather.py` | `6b3058b4b94a54e7afdf98c74f1dacb66f31cc9fc6745616cceba82c629fea82` |
 | `buyorwait/extraction/llm.py` | `01e40c69d939dac35d5afc244cdca1ff59cc57bb48a312cd00612c29c0fddeaf` |
 | `buyorwait/extraction/rules.py` | `924c5d48bde5d186ba35e1850ae1d7ab085cc56ec56338017f9ceb9c11746677` |
 | `buyorwait/finalize.py` | `e6a1ceffbecc2c4b7c15f2853b19c137c142e5a1ddb8927707c907e9ae59bde5` |
