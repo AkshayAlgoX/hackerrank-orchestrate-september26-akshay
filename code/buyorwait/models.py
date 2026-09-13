@@ -81,9 +81,22 @@ class PaymentOption:
     financing_fee: Decimal
     total_payable_amount: Decimal
 
+    @property
+    def schedule_defined(self) -> bool:
+        """A single payment needs no interval; several payments need a stated positive day count.
+
+        The statement defines an option by "when payments begin, the number of days between
+        recurring payments, ..." and forbids inventing payment information. With more than one
+        payment and no interval the dates of the later legs are unknown: the schedule is
+        undefined, and no default cadence (nor a same-day collapse) is assumed for it.
+        """
+        return self.number_of_payments <= 1 or bool(self.payment_frequency_days and self.payment_frequency_days > 0)
+
     def schedule(self) -> List[Tuple[date, Decimal]]:
         from datetime import timedelta
 
+        if not self.schedule_defined:
+            return []                     # undefined: never "all legs on the first date"
         out = []
         d = self.first_payment_date
         for i in range(self.number_of_payments):

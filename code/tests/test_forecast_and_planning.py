@@ -162,19 +162,53 @@ def test_installment_cadence_is_a_day_count_not_a_calendar_month_step():
     assert sched(1, None, date(2026, 7, 4)) == [(date(2026, 7, 4), D("100"))]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "schedule() guards the advance with `if self.payment_frequency_days:`, falsy for None AND "
-    "for 0, so a multi-payment option with a blank interval writes every leg on "
-    "first_payment_date -- which also makes completes_by_deadline trivially true and is "
-    "undetectable by validate_row, since it re-derives its check from the same schedule(). "
-    "Unreachable from dataset/request_payment_options.csv (all 275 blank-frequency rows are "
-    "full_payment with number_of_payments == 1; no row is blank AND multi-payment) and its "
-    "resolution is unresolved: the spec states no default interval and the solved samples show "
-    "only day-count arithmetic, so no replacement cadence is warranted without a decision"))
 def test_blank_frequency_never_stacks_every_leg_on_one_date():
+    """Closed (Target #5): a multi-payment option with no stated interval has an UNDEFINED
+    schedule. The statement defines an option by "the number of days between recurring
+    payments" and forbids inventing payment information, so neither a default cadence nor a
+    same-day collapse is assumed: schedule() is empty and the option is never a candidate."""
     opt = PaymentOption("payment_option_1", "r1", "installments", D("100"), 3, date(2026, 1, 31), None, D("0"), D("300"))
-    dates = [d for d, _ in opt.schedule()]
-    assert dates == sorted(set(dates)), f"legs stacked on {dates[0]}"
+    assert not opt.schedule_defined and opt.schedule() == []
+    zero = PaymentOption("payment_option_1", "r1", "installments", D("100"), 3, date(2026, 1, 31), 0, D("0"), D("300"))
+    assert not zero.schedule_defined and zero.schedule() == []          # an explicit 0-day "interval" is no interval
+
+
+def test_single_payment_option_needs_no_interval():
+    one = PaymentOption("payment_option_1", "r1", "full_payment", D("300"), 1, date(2026, 1, 31), None, D("0"), D("300"))
+    assert one.schedule_defined and one.schedule() == [(date(2026, 1, 31), D("300"))]
+
+
+@pytest.mark.parametrize("freq", [1, 7, 14, 28, 30, 31])
+def test_stated_interval_is_plain_day_count_arithmetic(freq):
+    opt = PaymentOption("payment_option_1", "r1", "installments", D("100"), 3, date(2026, 1, 31), freq, D("0"), D("300"))
+    assert opt.schedule_defined
+    assert [d for d, _ in opt.schedule()] == [date(2026, 1, 31) + timedelta(days=freq * i) for i in range(3)]
+
+
+def test_undefined_schedule_is_rejected_with_a_reason_and_cannot_fake_deadline_compliance():
+    ev = monthly("sal", "salary", 1500, 15, 5, etype="income", desc="Payroll credit")
+    p = mk_profile(current_available_balance=D("5000"), payment_methods=("installments",), max_installment_months=12)
+    blank = PaymentOption("payment_option_1", "r1", "installments", D("100"), 3, RD, None, D("0"), D("300"))
+    # a tight deadline that a stacked (all-on-day-one) schedule would trivially satisfy
+    dec, row = run_case(p, ev, mk_request(300, partial=False, deadline=RD), options=[blank])
+    assert row["recommended_payment_method"] == "not_recommended" and row["payment_plan"] == "none"
+    assert any("no payment_frequency_days" in r and "undefined" in r for r in dec.rejected)
+    assert dec.candidates == []
+    # the same option with a stated 30-day interval is an ordinary candidate
+    stated = PaymentOption("payment_option_1", "r1", "installments", D("100"), 3, RD, 30, D("0"), D("300"))
+    dec2, row2 = run_case(p, ev, mk_request(300, partial=False, deadline=RD + timedelta(days=70)), options=[stated])
+    assert row2["recommended_payment_method"] == "installments" and row2["payment_plan"].count("|") == 2
+
+
+def test_validate_row_cannot_be_matched_by_a_stacked_plan():
+    """Defence in depth: a stacked plan never matches an option whose schedule is undefined."""
+    blank = PaymentOption("payment_option_1", "r1", "installments", D("100"), 3, RD, None, D("0"), D("300"))
+    req = mk_request(300, partial=False, deadline=RD + timedelta(days=70))
+    stacked = {"request_id": "r1", "amount_safe_to_pay": "300", "affordability_status": "affordable_with_plan",
+               "recommended_payment_method": "installments", "payment_plan": f"{RD}:100|{RD}:100|{RD}:100",
+               "earliest_date_for_full_payment": RD.isoformat(), "spending_changes_needed": "none", "decision_explanation": "x"}
+    from buyorwait.output import validate_row
+    assert any("does not match any supplied option" in e for e in validate_row(stacked, req, [blank]))
 
 
 def test_rank_key_follows_exact_order():

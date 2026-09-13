@@ -169,6 +169,10 @@ def decide(req: Request, L: Ledger, options: Sequence[PaymentOption],
             if opt.payment_method == "installments":
                 rejected.append(f"{opt.payment_option_id}: {why}")
             continue
+        if not opt.schedule_defined:
+            rejected.append(f"{opt.payment_option_id}: {opt.number_of_payments} payments but no payment_frequency_days; "
+                            f"the schedule is undefined and no interval is assumed")
+            continue
         sched = opt.schedule()
         ok, why = completes_by_deadline(sched, deadline)
         if not ok:
