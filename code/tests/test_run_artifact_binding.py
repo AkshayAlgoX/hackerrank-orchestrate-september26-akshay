@@ -91,13 +91,14 @@ def test_F_rerun_after_an_interrupted_run_yields_a_consistent_set(prod, tmp_path
 # A / B / G. split-brain sets are refused
 # ---------------------------------------------------------------------------------------
 
-def test_A_process_dies_after_output_before_metadata_is_detected(prod, tmp_path, monkeypatch):
+def test_A_process_dies_during_staging_publishes_nothing(prod, tmp_path, monkeypatch):
+    """With the finalization protocol a death before PUBLISH leaves no artefact at all."""
     p = _paths(tmp_path)
-    # no previous run at all: output.csv exists, usage_last_run.json never written
     monkeypatch.setattr(prod, "write_proofs", lambda path, result: (_ for _ in ()).throw(RuntimeError("died")))
     with pytest.raises(RuntimeError):
         _run(prod, p)
-    assert os.path.exists(p["out"]) and not os.path.exists(p["usage"])
+    assert not os.path.exists(p["out"]) and not os.path.exists(p["usage"]) and not os.path.exists(p["proofs"])
+    assert [n for n in os.listdir(tmp_path) if n.startswith(".run-")] == []      # staging dir removed
     assert _report(p, str(tmp_path / "usage_report.md")) == 2
     assert not os.path.exists(tmp_path / "usage_report.md")
 
@@ -109,8 +110,10 @@ def test_A2_incomplete_metadata_without_a_digest_is_refused(prod, tmp_path):
     json.dump(u, open(p["usage"], "w"))
     import write_usage_report as wur
     assert any("incomplete" in m for m in wur.binding_problems(u, p["out"]))
-    assert _report(p, str(tmp_path / "usage_report.md")) == 2
-    assert not os.path.exists(tmp_path / "usage_report.md")
+    report = tmp_path / "usage_report.md"
+    before = report.read_bytes()                       # written by the run itself
+    assert _report(p, str(report)) == 2
+    assert report.read_bytes() == before               # refusal leaves the signed report untouched
 
 
 def test_B_new_output_with_old_metadata_fails_on_hash_mismatch(prod, tmp_path):
@@ -125,10 +128,13 @@ def test_B_new_output_with_old_metadata_fails_on_hash_mismatch(prod, tmp_path):
     import write_usage_report as wur
     problems = wur.binding_problems(json.loads(old_usage), p["out"])
     assert problems and "differs from the run metadata" in problems[0]
-    assert _report(p, str(tmp_path / "usage_report.md")) == 2
-    assert not os.path.exists(tmp_path / "usage_report.md")
-    res = wur.check_report(p["usage"], str(tmp_path / "usage_report.md"), DATASET, p["out"])
+    report = tmp_path / "usage_report.md"
+    before = report.read_bytes()
+    assert _report(p, str(report)) == 2
+    assert report.read_bytes() == before
+    res = wur.check_report(p["usage"], str(report), DATASET, p["out"])
     assert not res["ok"] and any("differs from the run metadata" in m for m in res["problems"])
+    assert res["manifest_state"] == "INCOMPLETE"
 
 
 def test_G_stale_metadata_from_a_previous_run_cannot_accompany_a_new_output(prod, tmp_path):
@@ -196,7 +202,8 @@ def test_usage_json_and_proofs_are_written_atomically_via_the_helper(prod, tmp_p
     monkeypatch.setattr(atomic.tempfile, "mkstemp", spy)
     p = _paths(tmp_path)
     assert _run(prod, p) == 0
-    assert {".output.csv.", ".proofs.json.", ".usage_last_run.json."} <= set(seen)
+    # staged names carry the .tmp suffix; the manifest is written through the helper too
+    assert {".output.csv.tmp.", ".proofs.json.tmp.", ".usage_last_run.json.tmp.", ".usage_report.md.tmp.", ".run_manifest.json."} <= set(seen)
 
 
 # ---------------------------------------------------------------------------------------

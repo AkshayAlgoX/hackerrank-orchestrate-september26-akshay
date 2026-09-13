@@ -1,6 +1,6 @@
 # Token usage and cost report
 
-Generated: 2026-09-12 23:11:34Z
+Generated: 2026-09-13 03:12:53Z
 
 This file summarises **the final full-dataset run that produced `output.csv`**.
 
@@ -28,7 +28,7 @@ messages and images into a validated schema. Message templates are handled first
 deterministic rules classifier; a model is called only for images and for messages no rule
 matches. Results are cached by content hash, so a re-run makes zero calls.
 
-Evidence sources: golden=16, rules=215
+Evidence sources: cache=16, rules=215
 
 ## Usage by model
 
@@ -61,7 +61,7 @@ conservatively prices them as regular input tokens.
 
 ## Reproducibility fingerprint
 
-Combined sha256 over the engine files: `525e9af5abc09842f38d51d47807f614acd03c69532aa17f747fae3c05b48dcb`
+Combined sha256 over the engine files: `1e42ac5009b4d8ead0b60c98c893eaed6f661bb80369f7304fc74957bb6e173a`
 
 | File | SHA-256 |
 |---|---|
@@ -72,8 +72,9 @@ Combined sha256 over the engine files: `525e9af5abc09842f38d51d47807f614acd03c69
 | `buyorwait/explain.py` | `81b5a88d7199470ffdf354336367f2bdb385cf6eea4c3fc00f9f9f652d5ced6e` |
 | `buyorwait/extraction/__init__.py` | `469f5e2d894b2458312a16699e07b2a7e901fb1f9d7cb9b1907088efdf4fba15` |
 | `buyorwait/extraction/gather.py` | `46cf4b648cdf943c863d23c52392663a0dd3e09b9a54f07e10a67ade09a8aaf9` |
-| `buyorwait/extraction/llm.py` | `e51bf29a64345d473a8778dbd4ecf324bd5d97f0b84bb3099818527d0d3e5be0` |
+| `buyorwait/extraction/llm.py` | `01e40c69d939dac35d5afc244cdca1ff59cc57bb48a312cd00612c29c0fddeaf` |
 | `buyorwait/extraction/rules.py` | `924c5d48bde5d186ba35e1850ae1d7ab085cc56ec56338017f9ceb9c11746677` |
+| `buyorwait/finalize.py` | `e6a1ceffbecc2c4b7c15f2853b19c137c142e5a1ddb8927707c907e9ae59bde5` |
 | `buyorwait/fingerprint.py` | `c7e07deca4f454c8eb445379923556f3c55a1012839ea7f14ee3e1e0b926571a` |
 | `buyorwait/forecast.py` | `e9ba6c253e3ef6a83026234b6659923404b0b488fb5d22aacda6cdde1b3031ae` |
 | `buyorwait/fx.py` | `bdffca6e3c4dd3e845ef9060ca32ca08873270e5d0af3e36cc7841548701cb85` |
@@ -86,7 +87,7 @@ Combined sha256 over the engine files: `525e9af5abc09842f38d51d47807f614acd03c69
 | `buyorwait/planning.py` | `a64843ed540790c98fb5f1a43c0a91589489e31bcf7ef2699a44df289eaec111` |
 | `buyorwait/spending.py` | `608530bcf5181d7d5d16c5e5caae0b4acdc037a8d5042ebc77dfc2121468fb50` |
 | `evaluation/golden/image_extraction_golden.json` | `a79a72a4d0696e45cd5433887bb0a018e4d403b9bae85fcaba176cb371fc05e5` |
-| `main.py` | `a6649adaa7d173e2af1026b873ed571e34d2a5911a3909ae912d59ddbf8715a9` |
+| `main.py` | `6e70e3743d6f9d714993f1fef17481902fb2d2afac2e0b78dcc2c251da61c394` |
 
 ## Reproducing this run
 

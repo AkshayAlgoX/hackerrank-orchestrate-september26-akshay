@@ -46,6 +46,17 @@ def _bind(repo, usage):
     return usage
 
 
+def _sign(repo, report=None):
+    """Write the completion manifest for the files currently on disk (what main.py does last)."""
+    from buyorwait import finalize
+    files = {"output": (repo["output"], repo["output"]), "usage": (repo["usage"], repo["usage"])}
+    if report is not None and os.path.exists(report):
+        files["report"] = (report, report)
+    m = finalize.build_manifest(files, wur._rows_in(repo["output"]), "test-fingerprint")
+    with open(finalize.manifest_path_for(repo["usage"]), "w", encoding="utf-8") as fh:
+        json.dump(m, fh)
+
+
 def _ctx(repo, usage):
     _bind(repo, usage)
     return wur.gather_context(usage, str(repo["dir"]), repo["output"], repo["usage"])
@@ -161,8 +172,22 @@ def test_check_passes_after_a_fresh_render(repo):
     report = os.path.join(os.path.dirname(repo["usage"]), "usage_report.md")
     with open(report, "w", encoding="utf-8") as fh:
         fh.write(wur.render(usage, _ctx(repo, usage)))
+    _sign(repo, report)
     res = wur.check_report(repo["usage"], report, str(repo["dir"]), repo["output"])
     assert res["ok"], res["problems"]
+    assert res["manifest_state"] == "COMPLETE"
+
+
+def test_check_refuses_an_unsigned_set(repo):
+    usage = _bind(repo, _usage())
+    with open(repo["usage"], "w", encoding="utf-8") as fh:
+        json.dump(usage, fh)
+    report = os.path.join(os.path.dirname(repo["usage"]), "usage_report.md")
+    with open(report, "w", encoding="utf-8") as fh:
+        fh.write(wur.render(usage, _ctx(repo, usage)))
+    res = wur.check_report(repo["usage"], report, str(repo["dir"]), repo["output"])
+    assert not res["ok"] and res["manifest_state"] == "INCOMPLETE"
+    assert any("no completion manifest" in p for p in res["problems"])
 
 
 def test_check_reports_a_missing_usage_json(repo):
@@ -176,6 +201,10 @@ def test_check_cli_exit_codes(repo):
     with open(repo["usage"], "w", encoding="utf-8") as fh:
         json.dump(usage, fh)
     report = os.path.join(os.path.dirname(repo["usage"]), "usage_report.md")
+    # rendering requires a signed output/usage pair; the render then re-signs the report
+    assert wur.main(["--usage", repo["usage"], "--dataset", str(repo["dir"]),
+                     "--predictions", repo["output"], "--out", report]) == 2
+    _sign(repo)
     rc = wur.main(["--usage", repo["usage"], "--dataset", str(repo["dir"]),
                    "--predictions", repo["output"], "--out", report])
     assert rc == 0

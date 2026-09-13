@@ -33,6 +33,7 @@ CODE = os.path.dirname(HERE)
 ROOT = os.path.dirname(CODE)
 sys.path.insert(0, CODE)
 
+from buyorwait import finalize  # noqa: E402
 from buyorwait.atomic import atomic_write  # noqa: E402
 from buyorwait.extraction.llm import PRICING_PER_MTOK  # noqa: E402
 
@@ -98,6 +99,7 @@ def gather_context(usage: dict, dataset: str, output: str, usage_path: str) -> d
         "requests_file": ds_requests,
         "requests_rows": _rows_in(ds_requests),
         "output_path": output,
+        "output_check_path": output,          # main.py points this at the staged bytes
         "output_rows": _rows_in(output) if output else -1,
         "usage_path": usage_path,
     }
@@ -140,7 +142,7 @@ def integrity(usage: dict, ctx: dict) -> list:
     if provider != "none" and total_calls == 0:
         checks.append((False, "a provider is configured but the run recorded zero model calls"))
 
-    bound = binding_problems(usage, ctx.get("output_path") or "")
+    bound = binding_problems(usage, ctx.get("output_check_path") or ctx.get("output_path") or "")
     if bound:
         checks.extend((False, m) for m in bound)
     else:
@@ -296,6 +298,12 @@ def check_report(usage_path: str = None, report_path: str = None, dataset: str =
     for ok, msg in integrity(usage, ctx):
         if not ok:
             problems.append(msg)
+    # The completion manifest is the only thing that says "these files are one run": a missing,
+    # partial, corrupted or mismatched manifest means the set on disk is not a completed run.
+    verdict = finalize.classify(finalize.manifest_path_for(usage_path),
+                                {"output": output, "usage": usage_path, "report": report_path})
+    if verdict["state"] != "COMPLETE":
+        problems.extend(verdict["problems"])
     fp = usage.get("engine_fingerprint") or {}
     if fp.get("combined"):
         try:
@@ -317,7 +325,8 @@ def check_report(usage_path: str = None, report_path: str = None, dataset: str =
             problems.append(f"{report_path}: out of date with {os.path.basename(usage_path)}; "
                             f"re-run this tool to regenerate it")
     return {"ok": not problems, "problems": problems, "requests": usage.get("requests"),
-            "provider": usage.get("provider"), "model": usage.get("model")}
+            "provider": usage.get("provider"), "model": usage.get("model"),
+            "manifest_state": verdict["state"]}
 
 
 def _strip_generated(text: str) -> str:
@@ -356,9 +365,17 @@ def main(argv=None) -> int:
             print("  ERROR", m, file=sys.stderr)
         print("-> REFUSED: usage_report.md not written (run metadata does not match output.csv)", file=sys.stderr)
         return 2
+    manifest_path = finalize.manifest_path_for(a.usage)
+    verdict = finalize.classify(manifest_path, {"output": a.predictions, "usage": a.usage}, ignore=("report",))
+    if verdict["state"] != "COMPLETE":
+        for m in verdict["problems"]:
+            print("  ERROR", m, file=sys.stderr)
+        print("-> REFUSED: usage_report.md not written (no signed completed run for this output/metadata pair)", file=sys.stderr)
+        return 2
     ctx = gather_context(usage, a.dataset, a.predictions, a.usage)
     text = render(usage, ctx)
     atomic_write(a.out, lambda fh: fh.write(text), mode="w", encoding="utf-8", newline="\n")
+    finalize.resign(manifest_path, "report", a.out)     # the re-rendered report joins the signed set
     bad = [m for ok, m in integrity(usage, ctx) if not ok]
     print(f"wrote {a.out}")
     for m in bad:

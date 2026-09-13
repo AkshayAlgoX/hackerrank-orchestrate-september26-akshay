@@ -36,6 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CODE = os.path.dirname(HERE)
 ROOT = os.path.dirname(CODE)
 sys.path.insert(0, HERE)
+sys.path.insert(0, CODE)
 
 import secret_scan  # noqa: E402
 
@@ -172,6 +173,23 @@ def check(root: str, zip_path: Optional[str] = None, exclude_reports: bool = Fal
     if "code/evidence_cache.json" in included:
         warnings.append("code/evidence_cache.json is a runtime content-hash cache; it makes re-runs "
                         "model-free. Keep it only if you want the shipped copy to reproduce offline.")
+
+    # Completion gate: once a run has been recorded, the report that ships must belong to the
+    # signed set (output.csv + usage_last_run.json + usage_report.md from one run).
+    usage_path = os.path.join(root, "code", "evaluation", "reports", "usage_last_run.json")
+    if os.path.exists(usage_path):
+        try:
+            from buyorwait import finalize
+            verdict = finalize.classify(finalize.manifest_path_for(usage_path),
+                                        {"output": os.path.join(root, "output.csv"), "usage": usage_path,
+                                         "report": os.path.join(root, "code", "evaluation", "usage_report.md")})
+        except Exception as exc:  # noqa: BLE001
+            verdict = {"state": "INCOMPLETE", "problems": [f"could not classify the run: {exc}"]}
+        if verdict["state"] != "COMPLETE":
+            for pr in verdict["problems"]:
+                errors.append(f"run artefacts are not a completed set: {pr}")
+    else:
+        warnings.append("no run recorded under code/evaluation/reports; usage_report.md cannot be tied to an output.csv")
 
     credentials = []
     for r in included:
