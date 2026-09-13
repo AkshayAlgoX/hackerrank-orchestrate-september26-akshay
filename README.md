@@ -211,3 +211,23 @@ Before submitting, confirm:
 - Every `amount_safe_to_pay` satisfies `0 <= amount_safe_to_pay <= requested_amount`.
 - Every installment plan matches a supplied payment option, and every spending change targets a flexible recurring expense.
 - Your runnable code, setup instructions, and `evaluation/` folder are included in `code.zip`.
+
+---
+
+## Final run provenance
+
+- The 250 rows in `output.csv` were produced deterministically by `python3 code/main.py`.
+- 215 message inputs were resolved by deterministic template rules.
+- The 16 image amounts came from `code/evidence_cache.json`.
+- `code/evidence_cache.json` is a content-hash cache of a prior vision-model run (recorded in the
+  transcript log, not in the committed final run); it is keyed by the image bytes and the linked
+  event, and every cached item is re-validated against the closed evidence schema on load.
+- `code/evaluation/golden/image_extraction_golden.json` is a SHA-guarded offline fallback and
+  benchmark of the same 16 readings; it was not consulted in the final shipped run.
+- The final shipped run made 0 live model calls (see `code/evaluation/usage_report.md`).
+- image_14 was corrected from 4593 to 4543 using the visible receipt (line items sum to 4543).
+- Removing the cache and the golden does not increase any row's affordability: image-dependent
+  future cash evidence that can no longer be resolved fails closed (requests 64 and 73 become
+  `0 / not_affordable`), and unresolved settled history is estimated conservatively.
+- Tool selection in the perception layer is static (one registered tool per source kind); there
+  is no autonomous or dynamic tool choice.

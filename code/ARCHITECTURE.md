@@ -35,7 +35,7 @@ Bounded Probabilistic Perception   +   Deterministic Financial Execution
 Input
   → Context
   → EvidenceAgent
-  → Tool Registry
+  → Tool manifest (static dispatch)
   → Validation
   → Recovery / Abstain
   → Canonical Evidence
@@ -64,7 +64,8 @@ for the test suite; the `anthropic` SDK only if that wire protocol is selected.
 `extraction/rules.py` classifies each message against the dataset's template vocabulary
 (English and Indonesian variants). A matched template yields evidence directly; an unmatched
 message yields `irrelevant` at low confidence. In the shipped full-dataset run every source
-was resolved offline: 215 by rules, 16 images by hand-verified golden readings, 0 by a model.
+was resolved offline: 215 by rules, 16 images from the content-hash cache (golden fallback unused), 0 live
+model calls in the shipped run.
 
 ### Model, when configured
 `extraction/llm.py` calls a provider only when `BUYORWAIT_LLM_PROVIDER`, `_MODEL` and an API
