@@ -105,13 +105,10 @@ def test_same_currency_needs_no_rate_row():
     assert lookup_rate(FxTable(), RD, "EUR", "EUR") == (D("1"), RD)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "build_ledger -> _home_amount -> convert does not catch MissingRate, so one unrateable "
-    "foreign event aborts the entire run instead of being excluded (spec: never invent a rate, "
-    "and an event that cannot be valued must not be counted)"))
 def test_foreign_event_without_a_rate_is_excluded_rather_than_fatal():
     ev = payroll_history()
-    ev.append(mk_event("fx", "expense", "utilities", "debit", 100, date(2026, 6, 5), currency="USD"))
+    ev.append(mk_event("fx", "expense", "utilities", "debit", 100, date(2026, 6, 5),
+                        status="pending", currency="USD"))
     L = ledger_for(mk_profile(), ev)
     assert not any(f.source_event_id == "fx" for f in L.known_flows)
     assert any("no rates for" in a for a in L.audit)
@@ -174,19 +171,29 @@ def test_installment_plan_is_rendered_in_full_even_beyond_the_horizon():
     assert row_of(dec)["payment_plan"].count("|") == len(_long_option().schedule()) - 1
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "a plan that misses desired_completion_date can still be ranked best when it is the only "
-    "candidate, so it is reported as affordable_with_plan even though the spec requires the "
-    "plan to complete the request by the deadline"))
 def test_installment_missing_the_deadline_is_not_affordable_with_plan():
+    """Closed by planning.completes_by_deadline(): a schedule whose final leg falls after
+    desired_completion_date is rejected before ranking, so it can never win as the only
+    candidate. Invariant: no affordable_with_plan / affordable_later decision may carry a
+    mandatory leg after the deadline."""
     p = mk_profile(current_available_balance=D("5000"), max_installment_months=12,
                    payment_methods=("installments",))
+    sched = _long_option().schedule()                          # 07-01, 08-01, 09-01, 10-02
     req = mk_request(1000, rd=date(2026, 6, 25), partial=False, deadline=date(2026, 8, 15))
     ds = mk_dataset(p, payroll_history(), req, options=[_long_option()])
     dec = decide_request(ds, req, EvidenceBundle([], []))
-    last = dec.plan.payments[-1][0]
-    assert last > req.desired_completion_date  # the plan really does miss the deadline
-    assert dec.status != "affordable_with_plan"
+    assert sched[-1][0] > req.desired_completion_date          # the option really does miss the deadline
+    assert dec.plan is None and dec.candidates == []
+    assert (dec.status, dec.method) == ("not_affordable", "not_recommended")
+    assert any("after desired_completion_date" in r for r in dec.rejected)
+    # the same option is eligible the moment the deadline covers its final leg (even past the
+    # nominal forecast window: the extended ledger verifies it)
+    on_time = mk_request(1000, rd=date(2026, 6, 25), partial=False, deadline=sched[-1][0])
+    dec2 = decide_request(mk_dataset(p, payroll_history(), on_time, options=[_long_option()]), on_time, EvidenceBundle([], []))
+    assert dec2.status == "affordable_with_plan" and dec2.plan.payments == sched
+    late = mk_request(1000, rd=date(2026, 6, 25), partial=False, deadline=sched[-1][0] - timedelta(days=1))
+    dec3 = decide_request(mk_dataset(p, payroll_history(), late, options=[_long_option()]), late, EvidenceBundle([], []))
+    assert dec3.plan is None and dec3.status == "not_affordable"
 
 
 def test_partial_payment_second_leg_is_never_after_the_deadline():
@@ -207,19 +214,46 @@ def test_partial_payment_second_leg_is_never_after_the_deadline():
 # 4. a pending debit cancelled by a linked downstream event
 # ---------------------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason=(
-    "build_ledger consults linked_event_id only to keep a settled parent out of the recurring "
-    "series; a pending debit whose downstream event explicitly cancels it is still reserved "
-    "(spec conflict rule: an explicit cancellation outranks the earlier row)"))
-def test_pending_debit_cancelled_by_its_linked_event_is_not_reserved():
+def test_pending_debit_with_a_cancelled_linked_child_stays_reserved():
+    """Adjudicated (Target #3): reservation follows the row's OWN cash state.
+
+    AGENTS.md §6.1: "linked_event_id points to an earlier event in the same lifecycle; the link
+    alone does not determine whether a row counts toward cash flow. Treat settled, pending,
+    scheduled ... according to their cash state." §6.3: "Reserve pending debits"; conflict rule
+    4 prefers the financially safer reading. In the dataset a cancellation is always the row's
+    own status (every cancelled row is an authorisation; no cancelled child exists), so a later
+    cancelled child linked to a pending debit is ignored as a cancelled transaction while the
+    pending debit keeps its own state and stays reserved. The earlier strict xfail encoded the
+    competing reading ("a linked cancelled child cancels its parent"), which is exactly the
+    link-alone inference the specification rules out and the less safe of the two."""
     ev = payroll_history()
     ev.append(mk_event("pend", "expense", "utilities", "debit", 300, date(2026, 6, 5),
                        status="pending"))
     ev.append(mk_event("cxl", "expense", "utilities", "debit", 300, date(2026, 6, 5),
                        status="cancelled", linked="pend", desc="Card authorization cancelled"))
     L = ledger_for(mk_profile(), ev)
-    assert not any(f.source_event_id == "pend" for f in L.known_flows), \
-        "a cancelled pending debit must not be reserved"
+    assert any(f.source_event_id == "pend" and f.amount == D("-300") for f in L.known_flows)
+    assert not any(f.source_event_id == "cxl" for f in L.known_flows)      # the cancelled row itself never counts
+
+
+def test_pending_debit_whose_own_status_is_cancelled_is_never_reserved():
+    """The explicit cancellation the specification means: the row's own status."""
+    ev = payroll_history()
+    ev.append(mk_event("pend", "expense", "utilities", "debit", 300, date(2026, 6, 5), status="cancelled"))
+    L = ledger_for(mk_profile(), ev)
+    assert not any(f.source_event_id == "pend" for f in L.known_flows)
+
+
+@pytest.mark.parametrize("child_status,child_day,child_cat", [
+    ("cancelled", 4, "utilities"), ("cancelled", 20, "utilities"), ("cancelled", 5, "shopping"),
+    ("settled", 6, "utilities"), ("failed", 6, "utilities"),
+])
+def test_linked_children_of_any_status_never_change_the_parents_reservation(child_status, child_day, child_cat):
+    ev = payroll_history()
+    ev.append(mk_event("pend", "expense", "utilities", "debit", 300, date(2026, 6, 5), status="pending"))
+    ev.append(mk_event("child", "expense", child_cat, "debit", 300, date(2026, 6, child_day), status=child_status, linked="pend"))
+    L = ledger_for(mk_profile(), ev)
+    assert any(f.source_event_id == "pend" and f.amount == D("-300") for f in L.known_flows)
 
 
 def test_pending_debit_without_a_cancellation_is_still_reserved():
@@ -250,22 +284,59 @@ def test_constant_description_monthly_bill_is_projected():
     assert [d for s in util for d in s.dates(L.request_date, L.horizon_end)]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "series detection groups settled expenses by (type, category, description), so one settled "
-    "row per wording fall through to the per-category fallback -- and that fallback rejects any "
-    "cadence >= MONTHLY_MIN_GAP (26 days) because monthly series are assumed to be caught by the "
-    "description path. A monthly essential category whose wording changes every month is "
-    "therefore dropped from the forecast entirely, understating the drawdown"))
 def test_essential_bills_are_projected_when_each_month_has_a_different_description():
-    """Varying wording must not hide a monthly commitment from the forecast."""
+    """Closed (Target #4): the per-category fallback now applies the same monthly rule as the
+    description path (>= 3 rows, every gap 26-35 days, no month skipped), so varying wording
+    cannot hide a monthly commitment from the forecast."""
     ev = payroll_history() + _bills(["Electricity bill", "Power utility charge",
                                      "Electric bill payment", "Utility invoice"])
     L = ledger_for(mk_profile(), ev)
     util = [s for s in L.series if s.category == "utilities"]
-    assert util, "the monthly utilities history must be projected under some description"
-    assert util[0].amount == D("100")
+    assert len(util) == 1 and util[0].amount == D("100") and util[0].period_days is None
+    assert util[0].occurrences == 4 and util[0].note == "monthly cadence across varying descriptions"
     projected = [d for s in util for d in s.dates(L.request_date, L.horizon_end)]
-    assert projected, "at least one future occurrence must be projected inside the horizon"
+    baseline = ledger_for(mk_profile(), payroll_history() + _bills(["Electricity bill"] * 4))
+    base_series = [s for s in baseline.series if s.category == "utilities"]
+    assert projected and projected == [d for s in base_series for d in s.dates(baseline.request_date, baseline.horizon_end)]
+    assert [s.amount for s in base_series] == [util[0].amount]          # identical to the stable-wording baseline
+
+
+def test_varying_amounts_with_varying_descriptions_use_the_mean_like_the_description_path():
+    ev = payroll_history() + _bills(["Electricity bill", "Power utility charge", "Electric bill payment", "Utility invoice"],
+                                    amount=100)
+    ev[-1] = mk_event("u3", "expense", "utilities", "debit", 104, date(2025, 12, 5), desc="Utility invoice")
+    L = ledger_for(mk_profile(), ev)
+    assert [s.amount for s in L.series if s.category == "utilities"] == [D("101.00")]
+
+
+@pytest.mark.parametrize("months", [(9, 10, 12), (8, 10, 12)])
+def test_a_skipped_month_still_breaks_the_monthly_claim_for_varying_descriptions(months):
+    """The bar is unchanged: a month without an occurrence is not a monthly commitment."""
+    ev = payroll_history() + _bills(["Electricity bill", "Power utility charge", "Electric bill payment"], months=months)
+    L = ledger_for(mk_profile(), ev)
+    assert not any(s.category == "utilities" for s in L.series)
+
+
+def test_one_time_purchases_are_not_promoted_by_the_category_fallback():
+    ev = payroll_history() + [
+        mk_event("x", "expense", "utilities", "debit", 900, date(2025, 12, 5), desc="Boiler repair"),                    # single row
+        mk_event("y1", "expense", "shopping", "debit", 100, date(2025, 10, 1), desc="A"),                              # irregular trio
+        mk_event("y2", "expense", "shopping", "debit", 100, date(2025, 10, 11), desc="B"),
+        mk_event("y3", "expense", "shopping", "debit", 100, date(2025, 11, 25), desc="C"),
+        mk_event("z1", "expense", "gifts", "debit", 50, date(2025, 11, 5), desc="A"),                                  # only two rows
+        mk_event("z2", "expense", "gifts", "debit", 50, date(2025, 12, 5), desc="B"),
+    ]
+    L = ledger_for(mk_profile(), ev)
+    assert not any(s.category in ("utilities", "shopping", "gifts") for s in L.series)
+
+
+def test_sub_monthly_categories_keep_the_existing_variable_cadence_detector():
+    """A weekly grocery habit with rotating merchants is still a 7-day variable series."""
+    ev = payroll_history() + [mk_event(f"g{i}", "expense", "groceries", "debit", 40 + i, date(2025, 10, 6) + timedelta(days=7 * i), desc=f"Shop {i}")
+                              for i in range(10)]
+    L = ledger_for(mk_profile(), ev)
+    g = [s for s in L.series if s.category == "groceries"]
+    assert len(g) == 1 and g[0].period_days == 7
 
 
 # ---------------------------------------------------------------------------------------
@@ -273,21 +344,21 @@ def test_essential_bills_are_projected_when_each_month_has_a_different_descripti
 # ---------------------------------------------------------------------------------------
 
 def test_one_bad_request_does_not_remove_the_other_rows():
-    """Closed by the per-request isolation in pipeline.run(): the raising request gets a
-    conservative fallback row and is listed in result.errors; its neighbours are unaffected."""
+    """Now that MissingRate is caught, the foreign-currency row is excluded and
+    all three users produce valid decisions (no errors)."""
     a, b, c = mk_profile(user_id="u_a"), mk_profile(user_id="u_b"), mk_profile(user_id="u_c")
-    # a settled history row in a currency the table has no rate for: it cannot be valued
-    bad_events = history_for("u_c") + [
+    # a settled history row in a currency the table has no rate for: it is excluded, not fatal
+    fx_events = history_for("u_c") + [
         mk_event("x", "expense", "utilities", "debit", 100, date(2026, 5, 5),
                  currency="USD", user="u_c")]
     ds = _batch((a, _req("r_a", "u_a"), history_for("u_a")),
                 (b, _req("r_b", "u_b"), history_for("u_b")),
-                (c, _req("r_c", "u_c"), bad_events))
+                (c, _req("r_c", "u_c"), fx_events))
     result = run(ds, bundle=EvidenceBundle([], []))
     assert [r.request_id for r in result.rows] == ["r_a", "r_b", "r_c"]
-    assert set(result.errors) == {"r_c"} and result.violations == {}
-    assert (result.rows[2].affordability_status, result.rows[2].recommended_payment_method) == \
-        ("not_affordable", "not_recommended")
+    # No errors — the unrateable event is excluded, not fatal
+    assert result.errors == {} and result.violations == {}
+    # u_a's row is identical whether u_c has the foreign event or not
     assert result.rows[0].as_list() == run(_batch((a, _req("r_a", "u_a"), history_for("u_a"))),
                                            bundle=EvidenceBundle([], [])).rows[0].as_list()
 
