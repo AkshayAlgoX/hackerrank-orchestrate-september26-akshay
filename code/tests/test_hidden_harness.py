@@ -290,10 +290,17 @@ def test_fx_foreign_pending_debit_is_converted_on_its_settlement_date():
 # 6. installments
 # =======================================================================================
 
-@pytest.mark.parametrize("n,max_months,eligible", [(3, 3, True), (4, 3, False), (3, None, False), (1, 1, True), (12, 12, True), (13, 12, False)])
-def test_installment_count_versus_max_months(n, max_months, eligible):
-    o = opt(1, n, RD, 100)
-    dec = decide(scenario(amount=100 * n, methods=("installments",), max_months=max_months, options=[o], deadline=RD + timedelta(days=30 * n + 5)))
+@pytest.mark.parametrize("n,freq,max_months,eligible", [
+    (3, 30, 3, True), (3, None, None, False), (1, 30, 1, True), (12, 30, 12, True),
+    # max_installment_months bounds the elapsed duration, not the count (H4):
+    (4, 28, 3, True),      # 84 days from the first payment is inside 3 months
+    (4, 31, 3, False),     # 93 days is beyond 06-02 + 3 months (09-02)
+    (13, 28, 12, True),    # 336 days is inside 12 months
+    (13, 31, 12, False),   # 372 days is beyond
+])
+def test_installment_duration_versus_max_months(n, freq, max_months, eligible):
+    o = opt(1, n, RD, 100, freq=freq)
+    dec = decide(scenario(amount=100 * n, methods=("installments",), max_months=max_months, options=[o], deadline=RD + timedelta(days=31 * n + 5)))
     assert (dec.method == "installments") is eligible
 
 

@@ -33,6 +33,28 @@ def _read(path: str) -> List[dict]:
         return list(csv.DictReader(fh))
 
 
+def _lenient_money(text: Optional[str]) -> Optional[Decimal]:
+    """An event money cell, tolerant of a literal that cannot be parsed.
+
+    Loading happens once, before the per-request isolation in pipeline.run, so a strict parse
+    would let one unreadable cell in financial_events.csv abort the whole batch and produce no
+    output at all - the contract requires one row per request_id whatever the rows contain. A
+    malformed cell is therefore read exactly like a blank one (None = unresolved) and handed to
+    the machinery that already exists for an unknown amount: a pending/scheduled debit with no
+    usable amount fails closed (UnresolvedCashEvidence -> the conservative fallback row), a settled
+    row drops out of recurring history, and a credit is never counted. Nothing is guessed from a
+    malformed cell and it is never read as zero. Strictness is kept everywhere else (requests,
+    profiles, payment options), where an unreadable amount is not something a row can survive.
+    """
+    try:
+        value = parse_money(text)
+    except ValueError:
+        return None
+    # "NaN" and "Infinity" parse as Decimal but are not quantities anyone can pay, so they are
+    # read as unresolved exactly like a literal that does not parse at all.
+    return value if value is None or value.is_finite() else None
+
+
 def load_profiles(path: str) -> Dict[str, Profile]:
     out: Dict[str, Profile] = {}
     for r in _read(path):
@@ -68,14 +90,14 @@ def load_events(path: str) -> List[Event]:
             description=r["description"].strip(),
             category=r["category"].strip(),
             direction=r["direction"].strip(),
-            amount=parse_money(r.get("amount")),
+            amount=_lenient_money(r.get("amount")),
             currency=r["currency"].strip(),
             event_date=_date(r["event_date"]),
             settlement_date=_opt_date(r.get("settlement_date")),
             status=status,
             linked_event_id=(r.get("linked_event_id") or "").strip() or None,
             flexibility=flex,
-            minimum_allowed_amount=parse_money(r.get("minimum_allowed_amount")),
+            minimum_allowed_amount=_lenient_money(r.get("minimum_allowed_amount")),
         ))
     return out
 

@@ -179,7 +179,8 @@ class Series:
 
 class UnresolvedCashEvidence(ValueError):
     """A cash debit that will still leave the account inside the planning window has no usable
-    home-currency amount (blank and not resolved by evidence, or no exchange rate).
+    home-currency amount: nothing is stated and no evidence resolves it, no usable exchange rate
+    is supplied, or the stated amount is not a positive quantity (see _home_amount).
 
     Such a debit can neither be reserved nor assumed zero, so no ledger can be built for the
     request: the pipeline renders its conservative fallback row instead (amount_safe_to_pay 0,
@@ -228,18 +229,44 @@ class Ledger:
 
 def _home_amount(ds: Dataset, e: Event, home: str, resolved: Dict[str, Tuple[Decimal, str]],
                  audit: Optional[list] = None) -> Optional[Decimal]:
+    """Home-currency value of one event's cash amount, or None when it cannot be established.
+
+    The single gate every event amount passes through, so the ways an amount can be unusable are
+    decided in one place and reported in one voice: nothing is stated and no evidence resolved it,
+    no usable rate is supplied for its currency, or the amount itself is not a positive quantity.
+
+    None never means zero here. The callers either drop the row from the history it might seed or
+    fail closed on it - a pending/scheduled debit with no usable amount raises
+    UnresolvedCashEvidence rather than being reserved at zero - so an unusable amount can never
+    quietly become "nothing to pay". An amount that is not a positive, finite quantity is treated
+    exactly like an absent one because neither can be reserved: a 0 amount is not a debit the
+    dataset ever states, and a negative one would turn a debit into a credit (money arriving that
+    the user never receives).
+    """
     if e.amount is not None:
         amt, cur = e.amount, e.currency
     elif e.event_id in resolved:
         amt, cur = resolved[e.event_id]
     else:
         return None
+    if not amt.is_finite() or amt <= ZERO:
+        if audit is not None:
+            audit.append(f"{e.event_id}: amount {cur} {amt} is not positive; excluded (never treated as zero)")
+        return None
     try:
-        return convert(ds.fx, amt, e.cash_date, cur, home)
+        home_amt = convert(ds.fx, amt, e.cash_date, cur, home)
     except MissingRate:
         if audit is not None:
             audit.append(f"{e.event_id}: no rates for {cur}->{home}; excluded (never invent a rate)")
         return None
+    if home_amt <= ZERO:
+        # Unreachable while lookup_rate rejects every non-positive rate and `amt` is positive above;
+        # kept as the function's own invariant so no caller can ever receive a non-positive amount
+        # from here, whatever a future rate source does.
+        if audit is not None:
+            audit.append(f"{e.event_id}: converted amount {home} {home_amt} is not positive; excluded")
+        return None
+    return home_amt
 
 
 def _resolved_amounts(evidence: List[Evidence], events_by_id: Dict[str, Event],
@@ -349,9 +376,15 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
     # ---- recurring expense series -----------------------------------------------------
     settled = [e for e in events if e.status == "settled" and e.is_debit and e.event_id not in transfer_ids
                and e.event_type in ("expense", "subscription", "debt_payment") and not is_lifecycle_one_off(e.description)
-               and not e.linked_event_id and e.event_date <= request_date]
-    linked_parents = {e.linked_event_id for e in events if e.linked_event_id}
-    settled = [e for e in settled if e.event_id not in linked_parents]
+               and e.event_date <= request_date]
+    # Lifecycle pairs are counted once, through the realized record: a settled child (the purchase
+    # that an authorization became, the retry that a failed attempt became) is settled cash history
+    # like any other row, and its parent is dropped whenever a settled child exists - whether that
+    # child is the realized debit or a settled reversal/refund that undid the parent. A parent whose
+    # children are all still pending/scheduled/cancelled keeps its own cash state, and a settled
+    # child whose parent is not in the data is ordinary settled history.
+    realized_parents = {e.linked_event_id for e in events if e.linked_event_id and e.status == "settled"}
+    settled = [e for e in settled if e.event_id not in realized_parents]
     amounts: Dict[str, Decimal] = {}
     for e in settled:
         a = _home_amount(ds, e, home, resolved, L.audit)

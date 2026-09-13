@@ -134,7 +134,8 @@ def test_installment_option_schedule_and_eligibility():
     assert opt.option_index == 7
     from buyorwait.planning import installment_eligible
     assert installment_eligible(opt, mk_profile(max_installment_months=3))[0]
-    assert not installment_eligible(opt, mk_profile(max_installment_months=2))[0]
+    assert installment_eligible(opt, mk_profile(max_installment_months=2))[0]        # last leg 08-04 is inside 06-05 + 2 months
+    assert not installment_eligible(opt, mk_profile(max_installment_months=1))[0]    # ... but beyond 07-05
     assert not installment_eligible(opt, mk_profile(max_installment_months=None))[0]
     assert not installment_eligible(opt, mk_profile(payment_methods=("full_payment",)))[0]
 

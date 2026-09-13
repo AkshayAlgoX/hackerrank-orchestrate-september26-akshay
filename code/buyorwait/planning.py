@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .forecast import SpendingChange, amount_safe_to_pay, earliest_full_payment_date, is_safe, project_flows, simulate
-from .ledger import Ledger, UnresolvedCashEvidence
+from .ledger import Ledger, UnresolvedCashEvidence, add_months
 from .models import PaymentOption, Request
 from .money import ZERO, q2
 from .spending import select_changes
@@ -85,8 +85,16 @@ def installment_eligible(opt: PaymentOption, profile) -> Tuple[bool, str]:
         return False, "user will not consider installments"
     if profile.max_installment_months is None:
         return False, "max_installment_months blank"
-    if opt.number_of_payments > profile.max_installment_months:
-        return False, f"{opt.number_of_payments} payments exceed max_installment_months={profile.max_installment_months}"
+    # max_installment_months bounds the plan's elapsed calendar duration, not its payment count:
+    # the final payment must fall within that many months of the first. A multi-payment option
+    # with no stated interval has no final date and is left to the undefined-schedule rejection
+    # (no interval is ever assumed).
+    if opt.schedule_defined and opt.number_of_payments > 1:
+        last = opt.schedule()[-1][0]
+        limit = add_months(opt.first_payment_date, profile.max_installment_months)
+        if last > limit:
+            return False, (f"final payment {last.isoformat()} is {(last - limit).days} day(s) beyond "
+                           f"max_installment_months={profile.max_installment_months} from the first payment ({limit.isoformat()})")
     return True, ""
 
 
