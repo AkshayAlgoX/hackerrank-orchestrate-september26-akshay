@@ -22,7 +22,7 @@ from buyorwait.extraction.gather import EvidenceBundle, gather_evidence
 from buyorwait.fingerprint import engine_fingerprint
 from buyorwait.forecast import amount_safe_to_pay, earliest_full_payment_date, is_safe, project_flows, simulate
 from buyorwait.fx import MissingRate, convert, lookup_rate
-from buyorwait.ledger import build_ledger, forecast_horizon_end
+from buyorwait.ledger import UnresolvedCashEvidence, build_ledger, forecast_horizon_end
 from buyorwait.models import Dataset, FxTable, ImageRef, Message, PaymentOption, Request
 from buyorwait.output import COLUMNS, render_row, validate_row
 from buyorwait.pipeline import bottleneck_of, decide_request, proof_of, run
@@ -447,10 +447,14 @@ def test_lifecycle_settled_history_is_not_reserved_again():
 
 
 def test_lifecycle_blank_amount_is_excluded_never_zero():
+    # a pending debit with no usable amount is never zero: no ledger can be built for the
+    # request (fail closed), and the pipeline renders the conservative fallback row
     ev = base_events() + [mk_event("blank", "expense", "utilities", "debit", None, RD + timedelta(days=4), status="pending")]
-    L = build_ledger(scenario(events=ev), "u1", RD, [])
-    assert not any(f.source_event_id == "blank" for f in L.known_flows)
-    assert any("blank amount unresolved" in a for a in L.audit)
+    with pytest.raises(UnresolvedCashEvidence) as info:
+        build_ledger(scenario(events=ev), "u1", RD, [])
+    assert info.value.event_ids == ["blank"]
+    res = run(scenario(events=ev), bundle=EvidenceBundle([], []))
+    assert res.rows[0].as_list()[1:7] == ["0", "not_affordable", "not_recommended", "none", "", "none"]
 
 
 def test_lifecycle_blank_amount_resolved_by_image_evidence():

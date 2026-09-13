@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from .atomic import atomic_write
 from .extraction import EvidenceBundle, gather_evidence
 from .forecast import project_flows, simulate
-from .ledger import Ledger, build_ledger
+from .ledger import Ledger, UnresolvedCashEvidence, build_ledger
 from .models import Dataset, Request
 from .output import OutputRow, render_row, validate_row
 from .planning import Decision, decide
@@ -30,6 +30,9 @@ class RunResult:
 
 FALLBACK_EXPLANATION = ("Do not proceed: this request could not be evaluated ({error}), so no "
                         "payment is recommended until it can be re-checked.")
+UNRESOLVED_EXPLANATION = ("Do not proceed: the amount of a debit still due inside the forecast window could not "
+                          "be established from the available evidence ({detail}), so nothing can be certified "
+                          "safe and no payment is recommended until that amount is known.")
 
 
 def fallback_row(req: Request, exc: BaseException) -> OutputRow:
@@ -40,10 +43,14 @@ def fallback_row(req: Request, exc: BaseException) -> OutputRow:
     combination that is valid under §6.2 without any knowledge of the user's finances, and a
     reviewer can see from the explanation that it is a fallback rather than a decision.
     """
+    if isinstance(exc, UnresolvedCashEvidence):
+        text = UNRESOLVED_EXPLANATION.format(detail="; ".join(exc.reasons))
+    else:
+        text = FALLBACK_EXPLANATION.format(error=type(exc).__name__)
     return OutputRow(request_id=req.request_id, amount_safe_to_pay="0",
                      affordability_status="not_affordable", recommended_payment_method="not_recommended",
                      payment_plan="none", earliest_date_for_full_payment="", spending_changes_needed="none",
-                     decision_explanation=FALLBACK_EXPLANATION.format(error=type(exc).__name__))
+                     decision_explanation=text)
 
 
 def decide_request(ds: Dataset, req: Request, bundle: EvidenceBundle) -> Decision:

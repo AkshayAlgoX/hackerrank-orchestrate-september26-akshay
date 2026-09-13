@@ -105,12 +105,16 @@ def test_same_currency_needs_no_rate_row():
     assert lookup_rate(FxTable(), RD, "EUR", "EUR") == (D("1"), RD)
 
 
-def test_foreign_event_without_a_rate_is_excluded_rather_than_fatal():
+def test_foreign_history_event_without_a_rate_is_excluded_rather_than_fatal():
+    # settled history in a currency with no supplied rate: excluded from the recurrence
+    # estimate and audited (never a guessed rate). A PENDING/SCHEDULED debit without a rate is
+    # a different matter - it still has to leave the account, so the request fails closed
+    # (see test_fail_closed_unresolved_cash.py).
     ev = payroll_history()
-    ev.append(mk_event("fx", "expense", "utilities", "debit", 100, date(2026, 6, 5),
-                        status="pending", currency="USD"))
+    ev += [mk_event("fx1", "expense", "utilities", "debit", 100, date(2026, 6, 5) - timedelta(days=30),
+                    status="settled", currency="USD")]
     L = ledger_for(mk_profile(), ev)
-    assert not any(f.source_event_id == "fx" for f in L.known_flows)
+    assert not any(s.category == "utilities" for s in L.series)
     assert any("no rates for" in a for a in L.audit)
 
 
@@ -477,3 +481,28 @@ def test_option_schedule_is_never_silently_reordered_or_rescaled():
     if dec.method == "installments":
         assert dec.plan.payments == opt.schedule()
         assert dec.plan.total_paid == opt.total_payable_amount
+
+def test_missing_amount_in_recurring_series_averages_known_occurrences():
+    import dataclasses
+    from decimal import Decimal as D
+    from datetime import date
+    ev = payroll_history() + _bills(["Elec"] * 4, amount=100)
+    L_known = ledger_for(mk_profile(), ev)
+    
+    # Drop amount for one event
+    ev_missing = payroll_history() + _bills(["Elec"] * 4, amount=100)
+    ev_missing = [dataclasses.replace(e, amount=None) if e.description == "Elec" and e.event_date == date(2025, 11, 5) else e for e in ev_missing]
+            
+    L_missing = ledger_for(mk_profile(), ev_missing)
+    # the series should still be detected!
+    assert [s.amount for s in L_known.series if s.category == "utilities"] == [D("100")]
+    assert [s.amount for s in L_missing.series if s.category == "utilities"] == [D("100")]
+
+def test_missing_all_amounts_in_recurring_series_fails_closed():
+    from buyorwait.ledger import UnresolvedCashEvidence
+    import dataclasses
+    import pytest
+    ev = payroll_history() + _bills(["Elec"] * 4, amount=100)
+    ev = [dataclasses.replace(e, amount=None) if e.description == "Elec" else e for e in ev]
+    with pytest.raises(UnresolvedCashEvidence):
+        ledger_for(mk_profile(), ev)

@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .forecast import SpendingChange, amount_safe_to_pay, earliest_full_payment_date, is_safe, project_flows, simulate
-from .ledger import Ledger
+from .ledger import Ledger, UnresolvedCashEvidence
 from .models import PaymentOption, Request
 from .money import ZERO, q2
 from .spending import select_changes
@@ -105,16 +105,23 @@ def decide(req: Request, L: Ledger, options: Sequence[PaymentOption],
     p = L.profile
     base_flows = project_flows(L)
     extended: Dict[date, Tuple[Ledger, list]] = {}
+    unverifiable: Dict[date, str] = {}
 
     def ledger_for(payments) -> Optional[Tuple[Ledger, list]]:
         """(ledger, flows) able to verify every payment, or None when nothing can."""
         last = max(d for d, _ in payments)
         if last <= L.horizon_end:
             return L, base_flows
-        if ledger_to is None:
+        if ledger_to is None or last in unverifiable:
             return None
         if last not in extended:
-            Lx = ledger_to(last)
+            try:
+                Lx = ledger_to(last)
+            except UnresolvedCashEvidence as exc:
+                # a debit with no usable amount falls inside the longer window: only the plans
+                # reaching that far are unverifiable; the nominal-window decision stands
+                unverifiable[last] = str(exc)
+                return None
             extended[last] = (Lx, project_flows(Lx))
         return extended[last]
     safe = amount_safe_to_pay(L, base_flows, req.requested_amount)
@@ -180,8 +187,10 @@ def decide(req: Request, L: Ledger, options: Sequence[PaymentOption],
             continue
         scope = ledger_for(sched)
         if scope is None:
+            why = unverifiable.get(sched[-1][0])
             rejected.append(f"{opt.payment_option_id}: final payment {sched[-1][0].isoformat()} is after the "
-                            f"forecast window {L.horizon_end.isoformat()} and cannot be verified")
+                            f"forecast window {L.horizon_end.isoformat()} and cannot be verified"
+                            + (f" ({why})" if why else ""))
             continue
         Ls, flows_s = scope
         if is_safe(Ls, flows_s, sched):

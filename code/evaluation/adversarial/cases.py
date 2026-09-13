@@ -80,12 +80,19 @@ def case(fn):
 
 @case
 def blank_amount_is_never_zero():
-    """A blank-amount scheduled debit without evidence is excluded and audited, not treated as 0."""
+    """A blank-amount scheduled debit without evidence is never treated as 0 - and, because it is
+    still due inside the window, the request fails closed: the pipeline's fallback row (0 safe,
+    not_affordable) instead of a decision that silently omits the debit."""
+    from buyorwait.pipeline import run
+    from buyorwait.ledger import UnresolvedCashEvidence
     ev = monthly("rent", "rent", 800, 1, 5) + monthly("sal", "salary", 1500, 15, 5, etype="income", desc="Payroll credit")
     ev.append(mk_event("bill", "expense", "utilities", "debit", None, date(2026, 6, 5), status="scheduled"))
-    dec, row = run_case(mk_profile(), ev, mk_request(100))
-    assert any("blank amount unresolved" in a for a in dec.ledger.audit)
-    assert not any(f.source_event_id == "bill" for f in dec.ledger.known_flows)
+    req = mk_request(100)
+    res = run(mk_dataset(mk_profile(), ev, req), bundle=EvidenceBundle([], []))
+    row = res.rows[0].as_list()
+    assert row[1:7] == ["0", "not_affordable", "not_recommended", "none", "", "none"], row
+    assert res.errors[req.request_id].startswith(UnresolvedCashEvidence.__name__) and "bill" in res.errors[req.request_id]
+    assert "could not be established" in row[7]
 
 
 @case

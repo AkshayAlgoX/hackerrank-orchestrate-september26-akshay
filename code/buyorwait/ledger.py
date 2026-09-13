@@ -65,6 +65,41 @@ def estimate_variable_amount(amts: List[Decimal]) -> Decimal:
     return q2(sum(amts, ZERO) / len(amts))
 
 
+def _series_estimate(cat: str, es: List[Event], amounts: Dict[str, Decimal], audit: List[str], variable: bool) -> Decimal:
+    """Per-occurrence forecast for a detected series from the rows whose amounts are usable.
+
+    Recurrence is a property of the dates, so a row whose amount is unresolved still counts
+    toward the cadence; only its amount is absent here. With every amount missing nothing can
+    be forecast and the request fails closed. With some missing, the mean of the known rows
+    would be optimistic whenever the missing sample was above it (the sample request_35
+    invoice: +285 of room from one unread image), so the degraded estimate is the largest
+    typical known occurrence - never below any amount the history actually shows, never an
+    invented value - and the audit says so. Complete histories are unaffected.
+    """
+    known = [(e, amounts[e.event_id]) for e in es if e.event_id in amounts]
+    if not known:
+        kind = "variable" if variable else "monthly"
+        raise UnresolvedCashEvidence([e.event_id for e in es], [f"{cat}: {kind} recurrence detected but all amounts missing"])
+    amts = [a for _, a in known]
+    if variable:
+        # unusual one-off purchases (e.g. a bulk stock-up several times the typical basket) are
+        # not part of the spending pattern; they stay in history but not in the forecast
+        med = Decimal(str(median(amts)))
+        typical = [a for a in amts if a <= med * 3]
+        if len(typical) < len(amts):
+            audit.append(f"{cat}: {len(amts) - len(typical)} unusual amount(s) excluded from the recurring estimate")
+        amts = typical
+    missing = [e.event_id for e in es if e.event_id not in amounts]
+    if missing:
+        est = max(amts)
+        audit.append(f"{cat}: {len(missing)} historical amount(s) unresolved ({', '.join(missing)}); "
+                     f"estimate held at the largest known occurrence {est} (never the mean the missing sample could raise)")
+        return est
+    if not variable and len(set(amts)) == 1:
+        return amts[-1]
+    return estimate_variable_amount(amts)
+
+
 def _is_monthly(dates: List[date]) -> bool:
     """True when every consecutive gap is a calendar month apart (26-35 days): no month skipped."""
     gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
@@ -140,6 +175,22 @@ class Series:
                     out.append(d)
                 d = d + timedelta(days=self.period_days)
         return out
+
+
+class UnresolvedCashEvidence(ValueError):
+    """A cash debit that will still leave the account inside the planning window has no usable
+    home-currency amount (blank and not resolved by evidence, or no exchange rate).
+
+    Such a debit can neither be reserved nor assumed zero, so no ledger can be built for the
+    request: the pipeline renders its conservative fallback row instead (amount_safe_to_pay 0,
+    not_affordable). Settled history, credits, non-cash, failed/cancelled rows and rows beyond
+    the window never raise - their amounts do not change what leaves the account.
+    """
+
+    def __init__(self, event_ids: List[str], reasons: List[str]):
+        self.event_ids = list(event_ids)
+        self.reasons = list(reasons)
+        super().__init__("; ".join(reasons))
 
 
 @dataclass
@@ -260,6 +311,7 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
             L.audit.append(f"internal transfer pairs netted: {sorted(transfer_ids)}")
 
     # ---- known future items by cash state -------------------------------------------
+    unresolved_cash: List[Tuple[str, str]] = []
     for e in events:
         if e.event_id in transfer_ids or e.direction == "non_cash":
             continue
@@ -270,9 +322,13 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
             continue
         if e.status in ("pending", "scheduled") and e.is_debit:
             amt = _home_amount(ds, e, home, resolved, L.audit)
-            if amt is None:
-                continue
             on = max(e.cash_date, request_date)
+            if amt is None:
+                if on <= end:
+                    # fail closed: this debit will leave the account inside the window and
+                    # cannot be reserved without an amount (never treated as zero)
+                    unresolved_cash.append((e.event_id, f"{e.event_id}: {e.status} {e.category} debit due {on.isoformat()} has no usable amount"))
+                continue
             if on <= end:
                 L.known_flows.append(Flow(on, -amt, f"{e.status} {e.description}", e.event_id, None, e.category))
         if e.status == "scheduled" and e.is_credit:
@@ -287,6 +343,9 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
             else:
                 L.audit.append(f"{e.event_id}: scheduled non-payroll credit ({income_class(e.description)}) not counted")
 
+    if unresolved_cash:
+        raise UnresolvedCashEvidence([i for i, _ in unresolved_cash], [r for _, r in unresolved_cash])
+
     # ---- recurring expense series -----------------------------------------------------
     settled = [e for e in events if e.status == "settled" and e.is_debit and e.event_id not in transfer_ids
                and e.event_type in ("expense", "subscription", "debt_payment") and not is_lifecycle_one_off(e.description)
@@ -298,7 +357,6 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
         a = _home_amount(ds, e, home, resolved, L.audit)
         if a is not None:
             amounts[e.event_id] = a
-    settled = [e for e in settled if e.event_id in amounts]
 
     rent_multiplier = Decimal("1")
     rent_ev: Optional[Evidence] = None
@@ -331,8 +389,7 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
         regular_gaps = sum(1 for g in gaps if MONTHLY_MIN_GAP <= g <= 35)
         if regular_gaps < len(gaps):  # a monthly commitment recurs every month, no gaps skipped
             continue
-        amts = [amounts[e.event_id] for e in es]
-        amt = amts[-1] if len(set(amts)) == 1 else estimate_variable_amount(amts)
+        amt = _series_estimate(key[1], es, amounts, L.audit, variable=False)
         if key[1] == "rent":
             amt = q2(amt * rent_multiplier)
         latest = es[-1]
@@ -352,8 +409,7 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
         # description path applies: at least MIN_FIXED_OCCURRENCES rows, every gap 26-35 days,
         # no month skipped. Nothing else is inferred - the same bar keeps one-off purchases out.
         if len(es) >= MIN_FIXED_OCCURRENCES and _is_monthly([e.event_date for e in es]):
-            amts = [amounts[e.event_id] for e in es]
-            amt = amts[-1] if len(set(amts)) == 1 else estimate_variable_amount(amts)
+            amt = _series_estimate(cat, es, amounts, L.audit, variable=False)
             if cat == "rent":
                 amt = q2(amt * rent_multiplier)
             latest = es[-1]
@@ -368,15 +424,7 @@ def build_ledger(ds: Dataset, user_id: str, request_date: date, evidence: List[E
         if mg is None:
             L.audit.append(f"{cat}: {len(es)} settled rows without a regular cadence; not projected")
             continue
-        amts = [amounts[e.event_id] for e in es]
-        # unusual one-off purchases (e.g. a bulk stock-up several times the typical basket) are
-        # not part of the spending pattern; they stay in history but not in the forecast
-        med = Decimal(str(median(amts)))
-        typical = [(e, a) for e, a in zip(es, amts) if a <= med * 3]
-        if len(typical) < len(es):
-            L.audit.append(f"{cat}: {len(es) - len(typical)} unusual amount(s) excluded from the recurring estimate")
-        amts = [a for _, a in typical]
-        amt = estimate_variable_amount(amts)
+        amt = _series_estimate(cat, es, amounts, L.audit, variable=True)
         if cat == "rent":
             amt = q2(amt * rent_multiplier)
         latest = es[-1]
