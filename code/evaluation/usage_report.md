@@ -1,6 +1,6 @@
 # Token usage and cost report
 
-Generated: 2026-09-13 05:22:38Z
+Generated: 2026-09-13 06:15:57Z
 
 This file summarises **the final full-dataset run that produced `output.csv`**.
 
@@ -61,7 +61,7 @@ conservatively prices them as regular input tokens.
 
 ## Reproducibility fingerprint
 
-Combined sha256 over the engine files: `e1ee958b3b56d8649b7bd44fbae7d81ca1309242f6e1fa8fb70b1e1de34fb6da`
+Combined sha256 over the engine files: `1a2ff46faf88ce3736d3babdfa98df19f7db60353121a56ba64a177fb33428a2`
 
 | File | SHA-256 |
 |---|---|
@@ -79,13 +79,13 @@ Combined sha256 over the engine files: `e1ee958b3b56d8649b7bd44fbae7d81ca1309242
 | `buyorwait/fingerprint.py` | `c7e07deca4f454c8eb445379923556f3c55a1012839ea7f14ee3e1e0b926571a` |
 | `buyorwait/forecast.py` | `e9ba6c253e3ef6a83026234b6659923404b0b488fb5d22aacda6cdde1b3031ae` |
 | `buyorwait/fx.py` | `bdffca6e3c4dd3e845ef9060ca32ca08873270e5d0af3e36cc7841548701cb85` |
-| `buyorwait/ledger.py` | `5973b832f063cd212c0c395c87f6759aab257cd739d20b799378c9b526a81ef7` |
+| `buyorwait/ledger.py` | `523c590f8337f4d3160f109e949ace950af68e5facf8989ddfd65757e7d591b1` |
 | `buyorwait/loaders.py` | `d39f947cdbf61e5e862e04ba446d1401ff6670f1a1414b8de6da6e58bec71ad3` |
 | `buyorwait/models.py` | `0c2ccfda387ad6b6a693ca8ad9e69d0e94a1036913c22d8145d697b19a8fef77` |
 | `buyorwait/money.py` | `ca189240477a4fccf6e7149b3829b0523714d57571b166800b28fe4f9dafcb85` |
 | `buyorwait/output.py` | `fab9a36ec7b7b46df45735fbfaacfe9176e83311a486f1ccaf8a2551320044d8` |
-| `buyorwait/pipeline.py` | `cd24baa392295b414de7966b919738564345056d0c180023bd29ed2e0c64c3bd` |
-| `buyorwait/planning.py` | `8556f556d9190c5f4ae378eb6b59830e29b262f697976db61a941f07534bb38c` |
+| `buyorwait/pipeline.py` | `b02e1fad056e0fabb792f4f5256d90cabc874658d4d7455a187643d46f7e329c` |
+| `buyorwait/planning.py` | `60cad9b680179ecbdeb8ac0ebb71a9e6485d66e23ecd66a758658c5f305b9b91` |
 | `buyorwait/spending.py` | `608530bcf5181d7d5d16c5e5caae0b4acdc037a8d5042ebc77dfc2121468fb50` |
 | `evaluation/golden/image_extraction_golden.json` | `a79a72a4d0696e45cd5433887bb0a018e4d403b9bae85fcaba176cb371fc05e5` |
 | `main.py` | `6e70e3743d6f9d714993f1fef17481902fb2d2afac2e0b78dcc2c251da61c394` |
