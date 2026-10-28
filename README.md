@@ -12,7 +12,7 @@
 
 ---
 
-## 30-Second Recruiter Summary
+## Overview
 
 **Buy or Wait?** is an offline, constraint-based personal financial decision engine. Given 250 evaluation requests across 5 currencies (INR, USD, EUR, IDR, ZAR), historical transaction ledgers, pending authorizations, salary schedules, and unstructured context messages/receipts, the engine evaluates whether a user can afford a requested purchase today (`affordable_now`), through structured installments or a two-payment schedule (`affordable_with_plan`), by waiting for a safe liquidity window (`affordable_later`), or not at all (`not_affordable`).
 
@@ -118,7 +118,7 @@ flowchart TD
 * **Conservation Rules:** Settled history is fixed. Pending and scheduled debits are reserved on their respective cash dates. Pending credits, failed transactions, and unrealized investments never increment available balances.
 * **Recurring Expense Cadence Detection:**
   * *Fixed Commitments:* Requires at least 3 settled occurrences with 26–35 day intervals.
-  * *Variable Categories:* Requires at least 4 settled occurrences where $\ge 80\%$ of intervals fall within 1 day of the median gap (minimum median: 2 days). Projected at the historical mean with outliers ($> 3\times$ median) excluded.
+  * *Variable Categories:* Requires at least 4 settled occurrences where at least 80% of intervals fall within 1 day of the median gap (minimum median: 2 days). Projected at the historical mean with outliers (> 3x median) excluded.
 * **Fail-Closed Missing Amounts:** Debits with missing amounts in `financial_events.csv` require image or message resolution. If unresolved, `UnresolvedCashEvidence` triggers a conservative fail-closed fallback rather than defaulting to zero.
 
 ### 3. Suffix-Minimum Forecasting Engine ([`code/buyorwait/forecast.py`](code/buyorwait/forecast.py))
@@ -137,7 +137,16 @@ flowchart TD
 * **Hard Deadline Gating:** Candidates whose final payment falls after `desired_completion_date` are disqualified before ranking. A late plan can never win simply by being the sole candidate.
 * **Flexible Spending Reductions:** If an attractive plan is unsafe, the engine exhaustively evaluates combinations of up to 3 reductions (`stop:<event_id>` or `reduce_to:<event_id>:<amount>`), strictly restricted to recurring, non-essential categories marked flexible by the user.
 * **Deterministic Ranking Tuple:** Surviving candidates are ranked by a strict precedence tuple:
-  $$(\text{completes\_by\_deadline}, \text{no\_spending\_changes}, \text{lowest\_total\_cost}, \text{earliest\_start}, \text{fewest\_installments}, \text{lowest\_option\_id})$$
+  ```python
+  (
+      completes_by_deadline,    # Boolean: True sorts before False
+      no_spending_changes,      # Boolean: plans requiring 0 cuts preferred
+      lowest_total_cost,        # Decimal: lowest total cash outflow
+      earliest_start,           # ISO date: earlier transaction execution
+      fewest_installments,      # Integer: lower payment count
+      lowest_option_id          # Integer/String: deterministic tie-breaker
+  )
+  ```
 
 ### 5. Crash-Safe Atomic Finalization ([`code/buyorwait/atomic.py`](code/buyorwait/atomic.py))
 * File writers (`output.csv`, proof JSON, cache updates) generate temporary sibling files using `tempfile.mkstemp` in the target directory and replace them via atomic `os.replace`. An unexpected process interruption leaves existing output intact.
