@@ -29,9 +29,10 @@ DATASET = os.path.join(ROOT, "dataset")
 
 
 @pytest.fixture(scope="module")
-def samples():
+def samples(tmp_path_factory):
     ds = load_dataset(DATASET, "sample_requests.csv")
-    res = run(ds, use_model=False, cache_path=None)
+    # Throwaway cache: never read or rewrite the developer's code/evidence_cache.json.
+    res = run(ds, use_model=False, cache_path=str(tmp_path_factory.mktemp("cache") / "evidence_cache.json"))
     with open(os.path.join(DATASET, "sample_requests.csv"), newline="", encoding="utf-8") as fh:
         gold = {r["request_id"]: r for r in csv.DictReader(fh)}
     rows = {r.request_id: dict(zip(r.__dataclass_fields__, r.as_list())) for r in res.rows}

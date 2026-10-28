@@ -32,6 +32,8 @@ from buyorwait.pipeline import run
 RD = date(2026, 6, 2)
 H = forecast_horizon_end(RD)
 FAIL_CLOSED = ["0", "not_affordable", "not_recommended", "none", "", "none"]
+# Tracked image-extraction golden (evaluation/golden/), captured before any fixture patches it.
+TRACKED_IMAGE_GOLDEN = G.IMAGE_GOLDEN
 DATASET = os.path.join(os.path.dirname(__file__), "..", "..", "dataset")
 
 
@@ -145,7 +147,7 @@ def clean_env(monkeypatch, tmp_path):
     return str(tmp_path / "empty-cache.json")
 
 
-def test_request_64_never_becomes_more_affordable_when_its_evidence_is_missing(clean_env):
+def test_request_64_never_becomes_more_affordable_when_its_evidence_is_missing(clean_env, monkeypatch, tmp_path):
     ds = load_dataset(DATASET, "requests.csv")
     ds.requests = [r for r in ds.requests if r.request_id in ("request_64", "request_73")]
     clean = run(ds, use_model=False, cache_path=clean_env)
@@ -157,8 +159,12 @@ def test_request_64_never_becomes_more_affordable_when_its_evidence_is_missing(c
     assert rows["request_73"][1:7] == FAIL_CLOSED and "event_6859" in rows["request_73"][7]
     assert set(clean.errors) == {"request_64", "request_73"}
     assert not clean.violations
-    # the cached (resolved) run is the ordinary decision and is never less conservative than the fallback
-    normal = run(ds, use_model=False, cache_path=None)
+    # The resolved run is the ordinary decision and is never less conservative than the fallback.
+    # It resolves the amounts from the tracked golden, not from code/evidence_cache.json: that
+    # cache is an untracked local artefact, and depending on it made this test pass only on a
+    # machine that had run the model extraction.
+    monkeypatch.setattr(G, "IMAGE_GOLDEN", TRACKED_IMAGE_GOLDEN)
+    normal = run(ds, use_model=False, cache_path=str(tmp_path / "resolved-run-cache.json"))
     nrows = {r.request_id: r.as_list() for r in normal.rows}
     assert not normal.errors
     assert D(nrows["request_64"][1]) >= D(rows["request_64"][1])
@@ -290,11 +296,13 @@ def test_minimum_boundary_around_the_degraded_estimate():
         assert run(ds, bundle=EvidenceBundle([], [])).decisions["r1"].amount_safe == expect
 
 
-def test_request_35_clean_environment_is_not_more_affordable_than_the_resolved_run(clean_env):
+def test_request_35_clean_environment_is_not_more_affordable_than_the_resolved_run(clean_env, monkeypatch, tmp_path):
     ds = load_dataset(DATASET, "requests.csv")
     ds.requests = [r for r in ds.requests if r.request_id in ("request_35", "request_33", "request_78", "request_113")]
     clean = run(ds, use_model=False, cache_path=clean_env)
-    normal = run(ds, use_model=False, cache_path=None)
+    # Resolved run from the tracked golden, with a throwaway cache (see request_64 above).
+    monkeypatch.setattr(G, "IMAGE_GOLDEN", TRACKED_IMAGE_GOLDEN)
+    normal = run(ds, use_model=False, cache_path=str(tmp_path / "resolved-run-cache.json"))
     assert not clean.errors and not normal.errors
     for rid in ("request_35", "request_33", "request_78", "request_113"):
         c, n = clean.decisions[rid], normal.decisions[rid]

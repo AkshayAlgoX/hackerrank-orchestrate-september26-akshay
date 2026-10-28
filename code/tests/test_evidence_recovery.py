@@ -291,7 +291,9 @@ def test_12_normal_250_row_run_enters_recovery_zero_times_and_is_byte_identical(
     from buyorwait.loaders import load_dataset
     from buyorwait.output import write_csv
     ds = load_dataset(os.path.join(ROOT, "dataset"), "requests.csv")
-    res = run(ds, use_model=False, cache_path=os.path.join(ROOT, "code", "evidence_cache.json"))
+    # Throwaway cache: reproducible from tracked files, and the developer's
+    # code/evidence_cache.json is neither read nor rewritten.
+    res = run(ds, use_model=False, cache_path=str(tmp_path / "evidence_cache.json"))
     assert res.bundle.recovery["entered"] == 0 and res.bundle.recovery["calls"] == 0
     out = tmp_path / "output.csv"
     write_csv(str(out), res.rows)
