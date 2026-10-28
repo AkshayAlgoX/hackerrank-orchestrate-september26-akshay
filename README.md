@@ -136,15 +136,15 @@ flowchart TD
   4. `installments` matching seller-provided options within `max_installment_months`.
 * **Hard Deadline Gating:** Candidates whose final payment falls after `desired_completion_date` are disqualified before ranking. A late plan can never win simply by being the sole candidate.
 * **Flexible Spending Reductions:** If an attractive plan is unsafe, the engine exhaustively evaluates combinations of up to 3 reductions (`stop:<event_id>` or `reduce_to:<event_id>:<amount>`), strictly restricted to recurring, non-essential categories marked flexible by the user.
-* **Deterministic Ranking Tuple:** Surviving candidates are ranked by a strict precedence tuple:
+* **Deterministic Ranking Tuple:** Surviving candidates are sorted ascending by `Plan.rank_key()` in [`code/buyorwait/planning.py`](code/buyorwait/planning.py):
   ```python
   (
-      completes_by_deadline,    # Boolean: True sorts before False
-      no_spending_changes,      # Boolean: plans requiring 0 cuts preferred
-      lowest_total_cost,        # Decimal: lowest total cash outflow
-      earliest_start,           # ISO date: earlier transaction execution
-      fewest_installments,      # Integer: lower payment count
-      lowest_option_id          # Integer/String: deterministic tie-breaker
+      0 if self.completes_by_deadline else 1,   # 1. on-time first (always 0 here: late plans are rejected before ranking)
+      1 if self.changes else 0,                 # 2. plans needing no spending changes first
+      self.total_paid,                          # 3. lowest total paid (Decimal)
+      self.first_date,                          # 4. earliest first payment (date)
+      len(self.payments),                       # 5. fewest payments
+      self.option.option_index if self.option else 0,  # 6. payment-option order; 0 for full payment / wait
   )
   ```
 
@@ -184,8 +184,8 @@ warn request_139: not_affordable but earliest_date_for_full_payment is set (2024
 Four tests in `code/tests/` are marked `xfail(strict=True)` to document intentional edge-case divergences from the reference samples:
 1. `request_06`: Golden sample marks `affordable_with_plan`; our engine projects slightly higher variable spending, conservatively classifying it as `not_affordable`.
 2. `request_11`: Golden sample selects July for full payment; our engine identifies an earlier safe window in June.
-3. `request_19`: A minor divergence ($<3\%$) in partial payment split amounts resulting from variable spending mean estimation.
-4. `request_21`: Conservative vs. aggressive variable spending drawdown variance ($1.9\%$).
+3. `request_19`: A minor divergence (under 3%) in partial payment split amounts resulting from variable spending mean estimation.
+4. `request_21`: Conservative vs. aggressive variable spending drawdown variance (1.9%).
 
 ---
 
@@ -194,7 +194,7 @@ Four tests in `code/tests/` are marked `xfail(strict=True)` to document intentio
 When building the engine against competition specifications, several ambiguous requirements were adjudicated based on empirical testing against `dataset/sample_requests.csv`:
 
 1. **Calendar Month Horizon vs. Fixed 90 Days:** The specification referred informally to "the next 90 days." Testing demonstrated that three golden sample rows (`request_08`, `_12`, `_13`) are matched only when bills falling on days 87–90 are excluded by the end of the second calendar month. A literal 90-day offset misaligns with these reference rows.
-2. **Variable Spending Estimation Heuristic:** The reference generator used an unspecified parametric model for variable recurring expenses. Our engine projects regular categories using an unbiased historical mean ($80\%$ cadence match). This accounts for minor decimal differences in 4 out of 25 reference samples while remaining mathematically explainable.
+2. **Variable Spending Estimation Heuristic:** The reference generator used an unspecified parametric model for variable recurring expenses. Our engine projects regular categories using an unbiased historical mean (80% cadence match). This accounts for minor decimal differences in 4 out of 25 reference samples while remaining mathematically explainable.
 3. **Conservative Bill Retries:** When an automated bill retry is scheduled after a failure, the engine reserves the pending retry debit while continuing to project that month's recurring bill. This incurs ~1 extra bill of drawdown across 6 requests, deliberately prioritizing financial conservatism over optimistic assumptions.
 
 ---
