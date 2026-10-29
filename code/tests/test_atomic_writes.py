@@ -212,7 +212,9 @@ def test_full_dataset_output_is_byte_identical_to_the_50f864c_baseline(tmp_path)
         pytest.skip("dataset not present in this checkout")
     from buyorwait.loaders import load_dataset
     ds = load_dataset(dataset, "requests.csv")
-    res = run(ds, use_model=False, cache_path=os.path.join(ROOT, "code", "evidence_cache.json"))
+    # A throwaway cache: the baseline is reproducible from tracked files alone, and the
+    # developer's own code/evidence_cache.json must be neither read nor rewritten by a test.
+    res = run(ds, use_model=False, cache_path=str(tmp_path / "evidence_cache.json"))
     out = tmp_path / "output.csv"
     write_csv(str(out), res.rows)
     assert len(res.rows) == 250 and res.errors == {}
