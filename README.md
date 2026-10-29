@@ -12,7 +12,7 @@
 
 ---
 
-## 30-Second Recruiter Summary
+## Overview
 
 **Buy or Wait?** is an offline, constraint-based personal financial decision engine. Given 250 evaluation requests across 5 currencies (INR, USD, EUR, IDR, ZAR), historical transaction ledgers, pending authorizations, salary schedules, and unstructured context messages/receipts, the engine evaluates whether a user can afford a requested purchase today (`affordable_now`), through structured installments or a two-payment schedule (`affordable_with_plan`), by waiting for a safe liquidity window (`affordable_later`), or not at all (`not_affordable`).
 
@@ -118,7 +118,7 @@ flowchart TD
 * **Conservation Rules:** Settled history is fixed. Pending and scheduled debits are reserved on their respective cash dates. Pending credits, failed transactions, and unrealized investments never increment available balances.
 * **Recurring Expense Cadence Detection:**
   * *Fixed Commitments:* Requires at least 3 settled occurrences with 26–35 day intervals.
-  * *Variable Categories:* Requires at least 4 settled occurrences where $\ge 80\%$ of intervals fall within 1 day of the median gap (minimum median: 2 days). Projected at the historical mean with outliers ($> 3\times$ median) excluded.
+  * *Variable Categories:* Requires at least 4 settled occurrences where at least 80% of intervals fall within 1 day of the median gap (minimum median: 2 days). Projected at the historical mean with outliers (> 3x median) excluded.
 * **Fail-Closed Missing Amounts:** Debits with missing amounts in `financial_events.csv` require image or message resolution. If unresolved, `UnresolvedCashEvidence` triggers a conservative fail-closed fallback rather than defaulting to zero.
 
 ### 3. Suffix-Minimum Forecasting Engine ([`code/buyorwait/forecast.py`](code/buyorwait/forecast.py))
@@ -136,8 +136,17 @@ flowchart TD
   4. `installments` matching seller-provided options within `max_installment_months`.
 * **Hard Deadline Gating:** Candidates whose final payment falls after `desired_completion_date` are disqualified before ranking. A late plan can never win simply by being the sole candidate.
 * **Flexible Spending Reductions:** If an attractive plan is unsafe, the engine exhaustively evaluates combinations of up to 3 reductions (`stop:<event_id>` or `reduce_to:<event_id>:<amount>`), strictly restricted to recurring, non-essential categories marked flexible by the user.
-* **Deterministic Ranking Tuple:** Surviving candidates are ranked by a strict precedence tuple:
-  $$(\text{completes\_by\_deadline}, \text{no\_spending\_changes}, \text{lowest\_total\_cost}, \text{earliest\_start}, \text{fewest\_installments}, \text{lowest\_option\_id})$$
+* **Deterministic Ranking Tuple:** Surviving candidates are sorted ascending by `Plan.rank_key()` in [`code/buyorwait/planning.py`](code/buyorwait/planning.py):
+  ```python
+  (
+      0 if self.completes_by_deadline else 1,   # 1. on-time first (always 0 here: late plans are rejected before ranking)
+      1 if self.changes else 0,                 # 2. plans needing no spending changes first
+      self.total_paid,                          # 3. lowest total paid (Decimal)
+      self.first_date,                          # 4. earliest first payment (date)
+      len(self.payments),                       # 5. fewest payments
+      self.option.option_index if self.option else 0,  # 6. payment-option order; 0 for full payment / wait
+  )
+  ```
 
 ### 5. Crash-Safe Atomic Finalization ([`code/buyorwait/atomic.py`](code/buyorwait/atomic.py))
 * File writers (`output.csv`, proof JSON, cache updates) generate temporary sibling files using `tempfile.mkstemp` in the target directory and replace them via atomic `os.replace`. An unexpected process interruption leaves existing output intact.
@@ -175,8 +184,8 @@ warn request_139: not_affordable but earliest_date_for_full_payment is set (2024
 Four tests in `code/tests/` are marked `xfail(strict=True)` to document intentional edge-case divergences from the reference samples:
 1. `request_06`: Golden sample marks `affordable_with_plan`; our engine projects slightly higher variable spending, conservatively classifying it as `not_affordable`.
 2. `request_11`: Golden sample selects July for full payment; our engine identifies an earlier safe window in June.
-3. `request_19`: A minor divergence ($<3\%$) in partial payment split amounts resulting from variable spending mean estimation.
-4. `request_21`: Conservative vs. aggressive variable spending drawdown variance ($1.9\%$).
+3. `request_19`: A minor divergence (under 3%) in partial payment split amounts resulting from variable spending mean estimation.
+4. `request_21`: Conservative vs. aggressive variable spending drawdown variance (1.9%).
 
 ---
 
@@ -185,7 +194,7 @@ Four tests in `code/tests/` are marked `xfail(strict=True)` to document intentio
 When building the engine against competition specifications, several ambiguous requirements were adjudicated based on empirical testing against `dataset/sample_requests.csv`:
 
 1. **Calendar Month Horizon vs. Fixed 90 Days:** The specification referred informally to "the next 90 days." Testing demonstrated that three golden sample rows (`request_08`, `_12`, `_13`) are matched only when bills falling on days 87–90 are excluded by the end of the second calendar month. A literal 90-day offset misaligns with these reference rows.
-2. **Variable Spending Estimation Heuristic:** The reference generator used an unspecified parametric model for variable recurring expenses. Our engine projects regular categories using an unbiased historical mean ($80\%$ cadence match). This accounts for minor decimal differences in 4 out of 25 reference samples while remaining mathematically explainable.
+2. **Variable Spending Estimation Heuristic:** The reference generator used an unspecified parametric model for variable recurring expenses. Our engine projects regular categories using an unbiased historical mean (80% cadence match). This accounts for minor decimal differences in 4 out of 25 reference samples while remaining mathematically explainable.
 3. **Conservative Bill Retries:** When an automated bill retry is scheduled after a failure, the engine reserves the pending retry debit while continuing to project that month's recurring bill. This incurs ~1 extra bill of drawdown across 6 requests, deliberately prioritizing financial conservatism over optimistic assumptions.
 
 ---
